@@ -19,14 +19,10 @@ settings = get_settings()
 security = HTTPBearer()
 
 
-async def get_current_user_id(
+async def _decode_token(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
 ) -> dict:
-    """Extract and validate user from JWT token.
-
-    Returns:
-        Dict with user_id, tenant_id, role.
-    """
+    """Extract and validate JWT token payload."""
     try:
         payload = jwt.decode(
             credentials.credentials,
@@ -52,19 +48,26 @@ async def get_current_user_id(
         )
 
 
+async def get_current_user_id(
+    token_data: Annotated[dict, Depends(_decode_token)],
+) -> str:
+    """Get current user ID from JWT."""
+    return token_data["user_id"]
+
+
+async def get_tenant_id(
+    token_data: Annotated[dict, Depends(_decode_token)],
+) -> str:
+    """Get tenant ID from JWT."""
+    return token_data["tenant_id"]
+
+
 async def get_tenant_db(
-    user: Annotated[dict, Depends(get_current_user_id)],
+    token_data: Annotated[dict, Depends(_decode_token)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AsyncSession:
-    """Get a database session with tenant context set via RLS.
-
-    This middleware sets the PostgreSQL session variable used by
-    Row Level Security policies to filter data by tenant.
-
-    Returns:
-        AsyncSession with tenant context configured.
-    """
-    tenant_id = user["tenant_id"]
+    """Get a database session with tenant context set via RLS."""
+    tenant_id = token_data["tenant_id"]
 
     # Set RLS context for this session
     await db.execute(
@@ -76,5 +79,6 @@ async def get_tenant_db(
 
 
 # Type aliases for clean dependency injection
-CurrentUser = Annotated[dict, Depends(get_current_user_id)]
+CurrentUser = Annotated[str, Depends(get_current_user_id)]
+TenantId = Annotated[str, Depends(get_tenant_id)]
 TenantDB = Annotated[AsyncSession, Depends(get_tenant_db)]

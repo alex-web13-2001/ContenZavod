@@ -1,18 +1,19 @@
-"""API v1 main router — aggregates all sub-routers."""
+"""API v1 router — aggregates all endpoint modules."""
 
 from fastapi import APIRouter
 
-from app.api.v1 import health
+from app.api.v1.auth import router as auth_router
+from app.api.v1.channels import router as channels_router
+from app.api.v1.dashboard import router as dashboard_router
+from app.api.v1.health import router as health_router
+from app.api.v1.materials import router as materials_router
+from app.api.v1.sources import router as sources_router
 
 api_router = APIRouter()
 
-# Health check (no auth required)
-api_router.include_router(health.router, tags=["health"])
-
-# Future routers (uncomment as implemented):
-# api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-# api_router.include_router(materials.router, prefix="/materials", tags=["materials"])
-# api_router.include_router(channels.router, prefix="/channels", tags=["channels"])
-# api_router.include_router(publishing.router, prefix="/publish", tags=["publishing"])
-# api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
-# api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
+api_router.include_router(health_router)
+api_router.include_router(auth_router)
+api_router.include_router(dashboard_router)
+api_router.include_router(sources_router)
+api_router.include_router(materials_router)
+api_router.include_router(channels_router)
