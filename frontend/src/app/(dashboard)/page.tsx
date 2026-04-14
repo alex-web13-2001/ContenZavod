@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CzCard } from "@/components/ui-system";
 import { Radio, FileText, Send, BarChart3 } from "lucide-react";
 
 interface DashboardStats {
@@ -20,6 +20,14 @@ const statusLabels: Record<string, string> = {
   rejected: "Отклонены",
 };
 
+const statusColors: Record<string, string> = {
+  new: "var(--cz-info)",
+  classified: "var(--cz-primary)",
+  adapted: "var(--cz-warning)",
+  published: "var(--cz-success)",
+  rejected: "var(--cz-error)",
+};
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
 
@@ -27,106 +35,125 @@ export default function DashboardPage() {
     api.get<DashboardStats>("/dashboard/stats").then(setStats);
   }, []);
 
-  if (!stats) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-zinc-100">Дашборд</h1>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Card key={i} className="bg-zinc-900/50 border-zinc-800 animate-pulse">
-              <CardContent className="p-6 h-24" />
-            </Card>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  const cards = [
-    {
-      title: "Источники",
-      value: stats.sources.total,
-      subtitle: `${stats.sources.active} активных`,
-      icon: Radio,
-      gradient: "from-blue-500 to-cyan-500",
-    },
-    {
-      title: "Материалы",
-      value: stats.materials.total,
-      subtitle: `${stats.materials.by_status["new"] || 0} новых`,
-      icon: FileText,
-      gradient: "from-indigo-500 to-purple-500",
-    },
-    {
-      title: "Каналы",
-      value: stats.channels.total,
-      subtitle: "публикации",
-      icon: Send,
-      gradient: "from-emerald-500 to-teal-500",
-    },
-    {
-      title: "Публикации",
-      value: Object.values(stats.publish_jobs.by_status).reduce((a, b) => a + b, 0),
-      subtitle: `${stats.publish_jobs.by_status["published"] || 0} опубликовано`,
-      icon: BarChart3,
-      gradient: "from-amber-500 to-orange-500",
-    },
-  ];
+  const cards = stats
+    ? [
+        {
+          title: "Источники",
+          value: stats.sources.total,
+          sub: `${stats.sources.active} активных`,
+          icon: Radio,
+          gradient: "135deg, hsl(210 80% 55%), hsl(190 70% 50%)",
+        },
+        {
+          title: "Материалы",
+          value: stats.materials.total,
+          sub: `${stats.materials.by_status["new"] || 0} новых`,
+          icon: FileText,
+          gradient: "135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent))",
+        },
+        {
+          title: "Каналы",
+          value: stats.channels.total,
+          sub: "публикации",
+          icon: Send,
+          gradient: "135deg, hsl(152 60% 45%), hsl(170 55% 42%)",
+        },
+        {
+          title: "Публикации",
+          value: Object.values(stats.publish_jobs.by_status).reduce((a, b) => a + b, 0),
+          sub: `${stats.publish_jobs.by_status["published"] || 0} опубликовано`,
+          icon: BarChart3,
+          gradient: "135deg, hsl(38 85% 55%), hsl(20 80% 55%)",
+        },
+      ]
+    : null;
 
   return (
-    <div className="space-y-8">
+    <div style={{ display: "flex", flexDirection: "column", gap: "32px" }}>
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-zinc-100">Дашборд</h1>
-        <p className="text-zinc-500 mt-1">Обзор контент-платформы</p>
+        <h1 style={{ fontSize: "24px", fontWeight: 700, color: `hsl(var(--cz-text-primary))`, letterSpacing: "-0.02em" }}>
+          Дашборд
+        </h1>
+        <p style={{ fontSize: "14px", color: `hsl(var(--cz-text-muted))`, marginTop: "4px" }}>
+          Обзор контент-платформы
+        </p>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {cards.map((card) => (
-          <Card
-            key={card.title}
-            className="bg-zinc-900/50 border-zinc-800 hover:border-zinc-700 transition-colors"
-          >
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-zinc-500">{card.title}</p>
-                  <p className="text-3xl font-bold text-zinc-100 mt-1">{card.value}</p>
-                  <p className="text-xs text-zinc-500 mt-1">{card.subtitle}</p>
+      {/* Stat cards */}
+      <div
+        className="stagger-children"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+          gap: "16px",
+        }}
+      >
+        {cards
+          ? cards.map((card) => (
+              <CzCard key={card.title} interactive>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+                  <div>
+                    <p style={{ fontSize: "13px", color: `hsl(var(--cz-text-muted))`, marginBottom: "8px" }}>{card.title}</p>
+                    <p style={{ fontSize: "32px", fontWeight: 700, color: `hsl(var(--cz-text-primary))`, lineHeight: 1, letterSpacing: "-0.03em" }}>
+                      {card.value}
+                    </p>
+                    <p style={{ fontSize: "12px", color: `hsl(var(--cz-text-muted))`, marginTop: "6px" }}>{card.sub}</p>
+                  </div>
+                  <div
+                    style={{
+                      width: "44px",
+                      height: "44px",
+                      borderRadius: "var(--cz-radius-md)",
+                      background: `linear-gradient(${card.gradient})`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      opacity: 0.85,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <card.icon size={22} color="white" />
+                  </div>
                 </div>
-                <div
-                  className={`h-12 w-12 rounded-xl bg-gradient-to-br ${card.gradient} flex items-center justify-center opacity-80`}
-                >
-                  <card.icon className="h-6 w-6 text-white" />
-                </div>
+              </CzCard>
+            ))
+          : [1, 2, 3, 4].map((i) => (
+              <div key={i} className="skeleton" style={{ height: "120px" }} />
+            ))}
+      </div>
+
+      {/* Pipeline */}
+      {stats && stats.materials.total > 0 && (
+        <CzCard>
+          <h3 style={{ fontSize: "16px", fontWeight: 600, color: `hsl(var(--cz-text-primary))`, marginBottom: "16px" }}>
+            Воронка материалов
+          </h3>
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            {Object.entries(stats.materials.by_status).map(([status, count]) => (
+              <div
+                key={status}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "10px 16px",
+                  borderRadius: "var(--cz-radius-md)",
+                  backgroundColor: `hsl(var(--cz-bg-elevated))`,
+                  border: `1px solid hsl(var(--cz-border-subtle))`,
+                }}
+              >
+                <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: `hsl(${statusColors[status] || "var(--cz-text-muted)"})` }} />
+                <span style={{ fontSize: "13px", color: `hsl(var(--cz-text-secondary))` }}>
+                  {statusLabels[status] || status}
+                </span>
+                <span style={{ fontSize: "16px", fontWeight: 600, color: `hsl(var(--cz-text-primary))` }}>
+                  {count}
+                </span>
               </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Material Pipeline */}
-      {stats.materials.total > 0 && (
-        <Card className="bg-zinc-900/50 border-zinc-800">
-          <CardHeader>
-            <CardTitle className="text-lg text-zinc-200">Воронка материалов</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-4 flex-wrap">
-              {Object.entries(stats.materials.by_status).map(([status, count]) => (
-                <div
-                  key={status}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-800/50 border border-zinc-700/50"
-                >
-                  <span className="text-sm text-zinc-400">
-                    {statusLabels[status] || status}
-                  </span>
-                  <span className="text-lg font-semibold text-zinc-200">{count}</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+            ))}
+          </div>
+        </CzCard>
       )}
     </div>
   );

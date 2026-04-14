@@ -3,10 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CzInput, CzButton } from "@/components/ui-system";
+import { Mail, Lock } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,70 +23,123 @@ export default function LoginPage() {
       await login(email, password);
       router.push("/");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "Ошибка входа");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-900/20 via-transparent to-transparent" />
-
-      <Card className="relative w-full max-w-md mx-4 border-zinc-800 bg-zinc-900/80 backdrop-blur-sm">
-        <CardHeader className="space-y-1 text-center">
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-bold text-xl">
+    <div
+      style={{
+        minHeight: "100dvh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+        background: `
+          radial-gradient(ellipse 80% 60% at 50% 0%, hsl(var(--cz-primary) / 0.08), transparent),
+          radial-gradient(ellipse 60% 40% at 80% 100%, hsl(var(--cz-accent) / 0.06), transparent),
+          hsl(var(--cz-bg-root))
+        `,
+      }}
+    >
+      <div
+        className="animate-page-in"
+        style={{
+          width: "100%",
+          maxWidth: "400px",
+          padding: "40px 32px",
+          backgroundColor: `hsl(var(--cz-bg-surface) / 0.8)`,
+          backdropFilter: "blur(20px)",
+          border: `1px solid hsl(var(--cz-border-subtle))`,
+          borderRadius: "var(--cz-radius-xl)",
+          boxShadow: "var(--cz-shadow-lg)",
+        }}
+      >
+        {/* Logo */}
+        <div style={{ textAlign: "center", marginBottom: "32px" }}>
+          <div
+            style={{
+              width: "56px",
+              height: "56px",
+              margin: "0 auto 16px",
+              borderRadius: "var(--cz-radius-lg)",
+              background: "linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "white",
+              fontSize: "22px",
+              fontWeight: 700,
+              boxShadow: "0 4px 20px hsl(var(--cz-primary) / 0.3)",
+            }}
+          >
             CZ
           </div>
-          <CardTitle className="text-2xl font-bold text-zinc-100">ContenZavod</CardTitle>
-          <CardDescription className="text-zinc-400">
+          <h1
+            style={{
+              fontSize: "24px",
+              fontWeight: 700,
+              color: `hsl(var(--cz-text-primary))`,
+              letterSpacing: "-0.02em",
+            }}
+          >
+            ContenZavod
+          </h1>
+          <p
+            style={{
+              fontSize: "14px",
+              color: `hsl(var(--cz-text-muted))`,
+              marginTop: "6px",
+            }}
+          >
             Войдите для доступа к платформе
-          </CardDescription>
-        </CardHeader>
+          </p>
+        </div>
 
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">
-                {error}
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <Label htmlFor="email" className="text-zinc-300">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="bg-zinc-800/50 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-indigo-500/20"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password" className="text-zinc-300">Пароль</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="bg-zinc-800/50 border-zinc-700 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:ring-indigo-500/20"
-              />
-            </div>
-
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium"
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          {error && (
+            <div
+              className="animate-fade-in"
+              style={{
+                padding: "12px 16px",
+                fontSize: "13px",
+                color: `hsl(var(--cz-error))`,
+                backgroundColor: `hsl(var(--cz-error) / 0.08)`,
+                border: `1px solid hsl(var(--cz-error) / 0.15)`,
+                borderRadius: "var(--cz-radius-md)",
+              }}
             >
-              {loading ? "Вход..." : "Войти"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+              {error}
+            </div>
+          )}
+
+          <CzInput
+            label="Email"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            icon={<Mail size={18} />}
+          />
+
+          <CzInput
+            label="Пароль"
+            type="password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            icon={<Lock size={18} />}
+          />
+
+          <CzButton type="submit" loading={loading} fullWidth size="lg">
+            Войти
+          </CzButton>
+        </form>
+      </div>
     </div>
   );
 }

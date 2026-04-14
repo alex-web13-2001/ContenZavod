@@ -2,15 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
-import { Plus, Pencil, Trash2, Globe, Rss, Zap, Users } from "lucide-react";
+import { CzButton, CzInput, CzSelect, CzCard, CzBadge, CzDialog } from "@/components/ui-system";
+import { Plus, Pencil, Trash2, Radio, Globe, Rss, Zap, Users } from "lucide-react";
 import { toast } from "sonner";
 
 interface Source {
@@ -24,26 +17,21 @@ interface Source {
   created_at: string;
 }
 
-const typeIcons: Record<string, React.ElementType> = {
-  rss: Rss,
-  website: Globe,
-  api: Zap,
-  social: Users,
-};
-
-const typeLabels: Record<string, string> = {
-  rss: "RSS",
-  website: "Сайт",
-  api: "API",
-  social: "Соцсети",
-};
+const typeIcons: Record<string, React.ElementType> = { rss: Rss, website: Globe, api: Zap, social: Users };
+const typeLabels: Record<string, string> = { rss: "RSS", website: "Сайт", api: "API", social: "Соцсети" };
+const typeOptions = [
+  { value: "rss", label: "RSS" },
+  { value: "website", label: "Сайт" },
+  { value: "api", label: "API" },
+  { value: "social", label: "Соцсети" },
+];
 
 export default function SourcesPage() {
   const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", url: "", source_type: "rss", is_active: true });
+  const [form, setForm] = useState({ name: "", url: "", source_type: "rss" });
 
   const fetchSources = async () => {
     try {
@@ -63,12 +51,12 @@ export default function SourcesPage() {
         await api.patch(`/sources/${editingId}`, form);
         toast.success("Источник обновлён");
       } else {
-        await api.post("/sources", form);
+        await api.post("/sources", { ...form, is_active: true });
         toast.success("Источник добавлен");
       }
       setDialogOpen(false);
       setEditingId(null);
-      setForm({ name: "", url: "", source_type: "rss", is_active: true });
+      setForm({ name: "", url: "", source_type: "rss" });
       fetchSources();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Ошибка");
@@ -86,131 +74,91 @@ export default function SourcesPage() {
     }
   };
 
-  const openEdit = (source: Source) => {
-    setEditingId(source.id);
-    setForm({ name: source.name, url: source.url, source_type: source.source_type, is_active: source.is_active });
+  const openEdit = (s: Source) => {
+    setEditingId(s.id);
+    setForm({ name: s.name, url: s.url, source_type: s.source_type });
     setDialogOpen(true);
   };
 
   const openNew = () => {
     setEditingId(null);
-    setForm({ name: "", url: "", source_type: "rss", is_active: true });
+    setForm({ name: "", url: "", source_type: "rss" });
     setDialogOpen(true);
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
         <div>
-          <h1 className="text-2xl font-bold text-zinc-100">Источники</h1>
-          <p className="text-zinc-500 mt-1">Управление источниками контента</p>
+          <h1 style={{ fontSize: "24px", fontWeight: 700, color: `hsl(var(--cz-text-primary))`, letterSpacing: "-0.02em" }}>Источники</h1>
+          <p style={{ fontSize: "14px", color: `hsl(var(--cz-text-muted))`, marginTop: "4px" }}>Управление источниками контента</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-500">
-              <Plus className="h-4 w-4 mr-2" /> Добавить
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="bg-zinc-900 border-zinc-800">
-            <DialogHeader>
-              <DialogTitle className="text-zinc-100">
-                {editingId ? "Редактировать источник" : "Новый источник"}
-              </DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-zinc-300">Название</Label>
-                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required className="bg-zinc-800 border-zinc-700 text-zinc-100" />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-zinc-300">URL</Label>
-                <Input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} required className="bg-zinc-800 border-zinc-700 text-zinc-100" />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-zinc-300">Тип</Label>
-                <Select value={form.source_type} onValueChange={(v) => setForm({ ...form, source_type: v })}>
-                  <SelectTrigger className="bg-zinc-800 border-zinc-700 text-zinc-100"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-zinc-800 border-zinc-700">
-                    <SelectItem value="rss">RSS</SelectItem>
-                    <SelectItem value="website">Сайт</SelectItem>
-                    <SelectItem value="api">API</SelectItem>
-                    <SelectItem value="social">Соцсети</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-3">
-                <Switch checked={form.is_active} onCheckedChange={(v) => setForm({ ...form, is_active: v })} />
-                <Label className="text-zinc-300">Активен</Label>
-              </div>
-              <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500">
-                {editingId ? "Сохранить" : "Создать"}
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <CzButton onClick={openNew} icon={<Plus size={16} />}>Добавить</CzButton>
       </div>
 
+      <CzDialog open={dialogOpen} onClose={() => setDialogOpen(false)} title={editingId ? "Редактировать источник" : "Новый источник"}>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <CzInput label="Название" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required placeholder="Название источника" />
+          <CzInput label="URL" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} required placeholder="https://..." />
+          <CzSelect label="Тип" value={form.source_type} onChange={(v) => setForm({ ...form, source_type: v })} options={typeOptions} />
+          <CzButton type="submit" fullWidth size="lg">{editingId ? "Сохранить" : "Создать"}</CzButton>
+        </form>
+      </CzDialog>
+
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
-            <Card key={i} className="bg-zinc-900/50 border-zinc-800 animate-pulse">
-              <CardContent className="p-6 h-32" />
-            </Card>
-          ))}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "16px" }}>
+          {[1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: "140px" }} />)}
         </div>
       ) : sources.length === 0 ? (
-        <Card className="bg-zinc-900/50 border-zinc-800 border-dashed">
-          <CardContent className="p-12 text-center">
-            <Radio className="h-12 w-12 mx-auto text-zinc-600 mb-4" />
-            <h3 className="text-lg font-medium text-zinc-300">Нет источников</h3>
-            <p className="text-zinc-500 mt-1">Добавьте первый источник контента</p>
-            <Button onClick={openNew} className="mt-4 bg-indigo-600 hover:bg-indigo-500">
-              <Plus className="h-4 w-4 mr-2" /> Добавить источник
-            </Button>
-          </CardContent>
-        </Card>
+        <CzCard>
+          <div style={{ textAlign: "center", padding: "48px 24px" }}>
+            <Radio size={48} style={{ color: `hsl(var(--cz-text-muted))`, margin: "0 auto 16px" }} />
+            <h3 style={{ fontSize: "16px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))` }}>Нет источников</h3>
+            <p style={{ fontSize: "13px", color: `hsl(var(--cz-text-muted))`, marginTop: "6px" }}>Добавьте первый источник контента</p>
+            <div style={{ marginTop: "20px" }}>
+              <CzButton onClick={openNew} icon={<Plus size={16} />}>Добавить источник</CzButton>
+            </div>
+          </div>
+        </CzCard>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="stagger-children" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "16px" }}>
           {sources.map((source) => {
             const Icon = typeIcons[source.source_type] || Globe;
             return (
-              <Card key={source.id} className="bg-zinc-900/50 border-zinc-800 hover:border-zinc-700 transition-all group">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-lg bg-zinc-800 flex items-center justify-center">
-                        <Icon className="h-5 w-5 text-zinc-400" />
-                      </div>
-                      <div>
-                        <CardTitle className="text-sm font-medium text-zinc-200">{source.name}</CardTitle>
-                        <Badge variant={source.is_active ? "default" : "secondary"} className={`text-xs mt-1 ${source.is_active ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-zinc-700 text-zinc-400"}`}>
-                          {source.is_active ? "Активен" : "Выключен"}
-                        </Badge>
-                      </div>
+              <CzCard key={source.id} interactive>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "12px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div
+                      style={{
+                        width: "40px",
+                        height: "40px",
+                        borderRadius: "var(--cz-radius-md)",
+                        backgroundColor: `hsl(var(--cz-bg-overlay))`,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Icon size={20} style={{ color: `hsl(var(--cz-text-muted))` }} />
                     </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-500 hover:text-zinc-200" onClick={() => openEdit(source)}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-500 hover:text-red-400" onClick={() => handleDelete(source.id)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                    <div>
+                      <div style={{ fontSize: "14px", fontWeight: 600, color: `hsl(var(--cz-text-primary))` }}>{source.name}</div>
+                      <CzBadge variant={source.is_active ? "success" : "default"}>
+                        {source.is_active ? "Активен" : "Выключен"}
+                      </CzBadge>
                     </div>
                   </div>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <p className="text-xs text-zinc-500 truncate">{source.url}</p>
-                  <div className="flex items-center gap-4 mt-3 text-xs text-zinc-500">
-                    <span>{typeLabels[source.source_type]}</span>
-                    {source.error_count > 0 && (
-                      <span className="text-red-400">{source.error_count} ошибок</span>
-                    )}
-                    {source.last_scraped_at && (
-                      <span>Парсинг: {new Date(source.last_scraped_at).toLocaleDateString("ru")}</span>
-                    )}
+                  <div style={{ display: "flex", gap: "4px" }}>
+                    <CzButton variant="ghost" size="sm" onClick={() => openEdit(source)} icon={<Pencil size={14} />} />
+                    <CzButton variant="ghost" size="sm" onClick={() => handleDelete(source.id)} icon={<Trash2 size={14} />} />
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+                <p style={{ fontSize: "12px", color: `hsl(var(--cz-text-muted))`, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{source.url}</p>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "12px", fontSize: "12px", color: `hsl(var(--cz-text-muted))` }}>
+                  <span>{typeLabels[source.source_type]}</span>
+                  {source.error_count > 0 && <span style={{ color: `hsl(var(--cz-error))` }}>{source.error_count} ошибок</span>}
+                </div>
+              </CzCard>
             );
           })}
         </div>

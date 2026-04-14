@@ -18,16 +18,10 @@ export const metadata: Metadata = {
   description: "AI-управляемая платформа контент-менеджмента",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru" className="dark">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-zinc-950`}
-      >
+    <html lang="ru" className="dark" suppressHydrationWarning>
+      <body className={`${geistSans.variable} ${geistMono.variable}`}>
         {children}
         <Toaster richColors position="top-right" />
       </body>
