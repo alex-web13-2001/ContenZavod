@@ -21,6 +21,7 @@ RUN uv venv /opt/venv && uv sync --frozen --no-dev 2>/dev/null || uv sync
 # Make sure venv is used
 ENV PATH="/opt/venv/bin:$PATH"
 ENV VIRTUAL_ENV="/opt/venv"
+ENV PYTHONPATH="/app"
 
 # Copy application code (overridden by volume mount in dev)
 COPY . .

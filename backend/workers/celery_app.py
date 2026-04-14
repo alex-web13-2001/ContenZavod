@@ -65,4 +65,5 @@ celery_app.conf.beat_schedule = {
 # Explicitly register task modules
 celery_app.conf.include = [
     "workers.scrape_tasks",
+    "workers.ai_tasks",
 ]

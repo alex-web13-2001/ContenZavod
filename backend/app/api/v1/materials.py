@@ -68,3 +68,35 @@ async def update_material_status(
     if not material:
         raise HTTPException(status_code=404, detail="Material not found")
     return MaterialResponse.model_validate(material)
+
+
+@router.post("/{material_id}/classify", status_code=202)
+async def classify_material(
+    material_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _user: str = Depends(get_current_user_id),
+):
+    """Classify a single material using AI."""
+    from app.services.material_service import MaterialService
+
+    service = MaterialService(db, tenant_id)
+    material = await service.get(material_id)
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+
+    from workers.ai_tasks import classify_material as classify_task
+    task = classify_task.delay(material_id, tenant_id)
+    return {"task_id": task.id, "status": "queued"}
+
+
+@router.post("/classify-all", status_code=202)
+async def classify_all_new(
+    tenant_id: str = Depends(get_tenant_id),
+    _user: str = Depends(get_current_user_id),
+):
+    """Classify all materials with status 'new'."""
+    from workers.ai_tasks import classify_new_materials
+    task = classify_new_materials.delay(tenant_id)
+    return {"task_id": task.id, "status": "queued"}
+

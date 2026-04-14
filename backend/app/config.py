@@ -55,6 +55,7 @@ class Settings(BaseSettings):
 
     # ── AI Providers ──────────────────────────────
     gemini_api_key: str = ""
+    kie_api_key: str = ""  # KIE.ai API — Claude Haiku 4.5
     kling_access_key: str = ""
     kling_secret_key: str = ""
 
