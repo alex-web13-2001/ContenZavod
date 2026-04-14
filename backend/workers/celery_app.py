@@ -55,17 +55,14 @@ celery_app.conf.update(
 
 # Beat schedule (periodic tasks)
 celery_app.conf.beat_schedule = {
-    # Example: scrape all active sources every 2 hours
-    # "scrape-all-sources": {
-    #     "task": "workers.scrape_tasks.scrape_all_active_sources",
-    #     "schedule": crontab(minute=0, hour="*/2"),
-    # },
-    # Example: collect analytics every 6 hours
-    # "collect-analytics": {
-    #     "task": "workers.analytics_tasks.collect_all_metrics",
-    #     "schedule": crontab(minute=0, hour="*/6"),
-    # },
+    # Scrape all active sources every 2 hours
+    "scrape-all-sources": {
+        "task": "workers.scrape_tasks.scrape_all_active_sources",
+        "schedule": crontab(minute=0, hour="*/2"),
+    },
 }
 
-# Auto-discover tasks
-celery_app.autodiscover_tasks(["workers"])
+# Explicitly register task modules
+celery_app.conf.include = [
+    "workers.scrape_tasks",
+]

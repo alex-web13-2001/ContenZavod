@@ -13,6 +13,7 @@ dependencies = [
     # Database
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29.0",
+    "psycopg2-binary>=2.9.0",
     "alembic>=1.13.0",
     "greenlet>=3.0.0",
 
@@ -34,6 +35,10 @@ dependencies = [
 
     # HTTP client (for external APIs)
     "httpx>=0.27.0",
+
+    # Parsing
+    "feedparser>=6.0.0",
+    "beautifulsoup4>=4.12.0",
 
     # Object storage
     "minio>=7.2.0",

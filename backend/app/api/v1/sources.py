@@ -97,3 +97,25 @@ async def delete_source(
     deleted = await service.delete(source_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Source not found")
+
+
+@router.post("/{source_id}/scrape", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_scrape(
+    source_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _user: str = Depends(get_current_user_id),
+):
+    """Manually trigger scraping for a source. Returns Celery task ID."""
+    from app.services.source_service import SourceService
+
+    service = SourceService(db, tenant_id)
+    source = await service.get(source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    from workers.scrape_tasks import scrape_source
+    task = scrape_source.delay(source_id, tenant_id)
+
+    return {"task_id": task.id, "status": "queued", "source": source.name}
+
