@@ -1,4 +1,4 @@
-"""AI Classification service — uses Claude Haiku 4.5 via KIE.ai API.
+"""AI Classification service — uses Gemini 3 Pro via KIE.ai (OpenAI-compat API).
 
 Classifies raw materials:
   new → classifying → classified
@@ -23,62 +23,66 @@ from app.config import get_settings
 logger = structlog.get_logger()
 settings = get_settings()
 
-KIE_API_URL = "https://api.kie.ai/claude/v1/messages"
+# Gemini 3 Pro via KIE.ai — OpenAI-compatible endpoint
+KIE_API_URL = "https://api.kie.ai/gemini-3-pro/v1/chat/completions"
 KIE_API_KEY = settings.kie_api_key
-MODEL = "claude-sonnet-4-5"
+MODEL = "gemini-3-pro"
 
-# Classification schema for structured output via tool_use
+# Classification schema — OpenAI function calling format
 CLASSIFY_TOOL = {
-    "name": "classify_article",
-    "description": "Classify a news article and extract structured metadata",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "category": {
-                "type": "string",
-                "enum": [
-                    "politics", "economy", "society", "culture",
-                    "sport", "tech", "opinion", "lifestyle",
-                    "crime", "environment", "health", "world",
-                ],
-                "description": "Primary category of the article",
+    "type": "function",
+    "function": {
+        "name": "classify_article",
+        "description": "Classify a news article and extract structured metadata",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": [
+                        "politics", "economy", "society", "culture",
+                        "sport", "tech", "opinion", "lifestyle",
+                        "crime", "environment", "health", "world",
+                    ],
+                    "description": "Primary category of the article",
+                },
+                "subcategory": {
+                    "type": "string",
+                    "description": "More specific subcategory (e.g. 'Cyprus politics', 'EU economy', 'Middle East conflict')",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "3-5 keyword tags for the article",
+                },
+                "summary_ru": {
+                    "type": "string",
+                    "description": "Краткое описание статьи на русском языке, 1-2 предложения. Должно быть информативным и точным.",
+                },
+                "summary_en": {
+                    "type": "string",
+                    "description": "Short summary of the article in English, 1-2 sentences.",
+                },
+                "relevance_score": {
+                    "type": "integer",
+                    "description": "Relevance score 0-100 for Cyprus-based Russian-speaking audience. 100 = directly about Cyprus, 80+ = about Cyprus region, 50+ = about EU/Middle East, <50 = world news",
+                },
+                "sentiment": {
+                    "type": "string",
+                    "enum": ["positive", "negative", "neutral", "mixed"],
+                    "description": "Overall sentiment of the article",
+                },
+                "is_breaking": {
+                    "type": "boolean",
+                    "description": "True if this is breaking/urgent news that should be published immediately",
+                },
             },
-            "subcategory": {
-                "type": "string",
-                "description": "More specific subcategory (e.g. 'Cyprus politics', 'EU economy', 'Middle East conflict')",
-            },
-            "tags": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "3-5 keyword tags for the article",
-            },
-            "summary_ru": {
-                "type": "string",
-                "description": "Краткое описание статьи на русском языке, 1-2 предложения. Должно быть информативным и точным.",
-            },
-            "summary_en": {
-                "type": "string",
-                "description": "Short summary of the article in English, 1-2 sentences.",
-            },
-            "relevance_score": {
-                "type": "integer",
-                "description": "Relevance score 0-100 for Cyprus-based Russian-speaking audience. 100 = directly about Cyprus, 80+ = about Cyprus region, 50+ = about EU/Middle East, <50 = world news",
-            },
-            "sentiment": {
-                "type": "string",
-                "enum": ["positive", "negative", "neutral", "mixed"],
-                "description": "Overall sentiment of the article",
-            },
-            "is_breaking": {
-                "type": "boolean",
-                "description": "True if this is breaking/urgent news that should be published immediately",
-            },
+            "required": [
+                "category", "subcategory", "tags",
+                "summary_ru", "summary_en",
+                "relevance_score", "sentiment", "is_breaking",
+            ],
         },
-        "required": [
-            "category", "subcategory", "tags",
-            "summary_ru", "summary_en",
-            "relevance_score", "sentiment", "is_breaking",
-        ],
     },
 }
 
@@ -95,13 +99,14 @@ Rules:
 
 Always call the classify_article tool with your analysis."""
 
+
 class AIServiceTemporarilyUnavailable(Exception):
     """Raised when the AI API is temporarily unavailable (maintenance, rate limit)."""
     pass
 
 
 async def classify_article(title: str, content: str, url: str = "") -> dict[str, Any] | None:
-    """Classify a single article using Claude Haiku 4.5 via KIE.ai.
+    """Classify a single article using Gemini 3 Pro via KIE.ai (OpenAI-compat).
 
     Returns classification dict or None on failure.
     Raises AIServiceTemporarilyUnavailable for retryable errors.
@@ -110,7 +115,7 @@ async def classify_article(title: str, content: str, url: str = "") -> dict[str,
         logger.error("ai.classify.no_api_key")
         return None
 
-    # Truncate content to avoid token limits (Haiku has 200k context but we want speed)
+    # Truncate content to avoid token limits
     max_chars = 4000
     truncated = content[:max_chars] + ("..." if len(content) > max_chars else "")
 
@@ -120,28 +125,29 @@ Title: {title}
 URL: {url}
 Content: {truncated}"""
 
+    # OpenAI-compatible payload
     payload = {
-        "model": MODEL,
         "messages": [
-            {"role": "user", "content": user_message},
+            {"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]},
+            {"role": "user", "content": [{"type": "text", "text": user_message}]},
         ],
         "tools": [CLASSIFY_TOOL],
         "stream": False,
+        "include_thoughts": False,
     }
 
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {KIE_API_KEY}",
-        "anthropic-version": "2023-06-01",
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(KIE_API_URL, json=payload, headers=headers)
             data = resp.json()
 
             # Handle API-level errors (maintenance, rate limits)
-            if isinstance(data, dict) and data.get("code") in (500, 503, 429):
+            if isinstance(data, dict) and data.get("code") in (500, 503, 429, 455):
                 msg = data.get("msg", "API error")
                 logger.warning("ai.classify.api_unavailable", msg=msg, title=title[:60])
                 raise AIServiceTemporarilyUnavailable(msg)
@@ -153,27 +159,40 @@ Content: {truncated}"""
         logger.error("ai.classify.request_failed", error=str(e), title=title[:80])
         return None
 
-    # Extract tool_use result from response
-    content_blocks = data.get("content", [])
-    for block in content_blocks:
-        if block.get("type") == "tool_use" and block.get("name") == "classify_article":
-            result = block.get("input", {})
-            logger.info(
-                "ai.classify.success",
-                title=title[:60],
-                category=result.get("category"),
-                relevance=result.get("relevance_score"),
-            )
-            return result
+    # Extract tool_calls from OpenAI-format response
+    choices = data.get("choices", [])
+    if not choices:
+        logger.warning("ai.classify.no_choices", title=title[:60], response=data)
+        return None
 
-    # Fallback: try to parse text response
-    for block in content_blocks:
-        if block.get("type") == "text":
-            text = block.get("text", "")
+    message = choices[0].get("message", {})
+    tool_calls = message.get("tool_calls", [])
+
+    for tc in tool_calls:
+        func = tc.get("function", {})
+        if func.get("name") == "classify_article":
             try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                pass
+                result = json.loads(func.get("arguments", "{}"))
+                logger.info(
+                    "ai.classify.success",
+                    title=title[:60],
+                    category=result.get("category"),
+                    relevance=result.get("relevance_score"),
+                    model=data.get("model", MODEL),
+                    tokens=data.get("usage", {}).get("total_tokens"),
+                )
+                return result
+            except json.JSONDecodeError as e:
+                logger.error("ai.classify.json_parse_error", error=str(e), title=title[:60])
+                return None
+
+    # Fallback: try to parse text content as JSON
+    text_content = message.get("content", "")
+    if text_content:
+        try:
+            return json.loads(text_content)
+        except json.JSONDecodeError:
+            pass
 
     logger.warning("ai.classify.no_tool_result", title=title[:60], response=data)
     return None
