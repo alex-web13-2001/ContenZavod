@@ -6,7 +6,7 @@ where adapted content gets published.
 
 import uuid
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, String, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,7 +19,7 @@ class Channel(Base, TenantMixin, TimestampMixin):
     __tablename__ = "channels"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default="gen_random_uuid()"
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     channel_type: Mapped[str] = mapped_column(

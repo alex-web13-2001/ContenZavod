@@ -6,7 +6,7 @@ for reproducibility and A/B testing.
 
 import uuid
 
-from sqlalchemy import Boolean, Integer, String, Text
+from sqlalchemy import Boolean, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,7 +19,7 @@ class PromptConfig(Base, TenantMixin, TimestampMixin):
     __tablename__ = "prompt_configs"
 
     id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default="gen_random_uuid()"
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
 
     task_type: Mapped[str] = mapped_column(

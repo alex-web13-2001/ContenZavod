@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System dependencies for Playwright and build tools
+# System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
@@ -11,13 +11,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Copy dependency files
+# Copy dependency files first (for caching)
 COPY pyproject.toml uv.lock* ./
 
-# Install Python dependencies
-RUN uv sync --frozen --no-dev 2>/dev/null || uv sync
+# Install Python dependencies into the project venv
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+RUN uv venv /opt/venv && uv sync --frozen --no-dev 2>/dev/null || uv sync
 
-# Copy application code
+# Make sure venv is used
+ENV PATH="/opt/venv/bin:$PATH"
+ENV VIRTUAL_ENV="/opt/venv"
+
+# Copy application code (overridden by volume mount in dev)
 COPY . .
 
 # Default command (overridden in docker-compose)
