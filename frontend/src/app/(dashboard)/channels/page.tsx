@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Pencil, Trash2, Send, MessageCircle, Youtube, Globe } from "lucide-react";
+import { Plus, Pencil, Trash2, Send, MessageCircle, Video, Globe } from "lucide-react";
 import { toast } from "sonner";
 
 interface Channel {
@@ -24,7 +24,7 @@ interface Channel {
 
 const typeIcons: Record<string, React.ElementType> = {
   telegram: MessageCircle,
-  youtube: Youtube,
+  youtube: Video,
   website: Globe,
 };
 
