@@ -19,3 +19,8 @@
 - Alembic: async миграции для SQLAlchemy 2.0
 - Makefile: 20+ команд для управления проектом
 - Health check endpoint: /api/v1/health
+- API endpoints: auth (register/login/me), CRUD sources/channels, materials listing, dashboard stats
+- Pydantic schemas + Service layer с тенантной изоляцией
+- Frontend: Next.js 16 + shadcn/ui + Tailwind v4 + Zustand
+- Страницы: Login, Dashboard, Sources, Materials, Channels
+- Sidebar layout с auth guard и toast-уведомлениями
