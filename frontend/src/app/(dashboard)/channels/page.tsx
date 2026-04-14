@@ -1,0 +1,205 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { Plus, Pencil, Trash2, Send, MessageCircle, Youtube, Globe } from "lucide-react";
+import { toast } from "sonner";
+
+interface Channel {
+  id: string;
+  name: string;
+  channel_type: string;
+  config: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+}
+
+const typeIcons: Record<string, React.ElementType> = {
+  telegram: MessageCircle,
+  youtube: Youtube,
+  website: Globe,
+};
+
+const typeLabels: Record<string, string> = {
+  telegram: "Telegram",
+  youtube: "YouTube",
+  website: "Веб-сайт",
+};
+
+export default function ChannelsPage() {
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: "", channel_type: "telegram", is_active: true, config: {} as Record<string, unknown> });
+
+  const fetchChannels = async () => {
+    try {
+      const data = await api.get<{ items: Channel[] }>("/channels");
+      setChannels(data.items);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchChannels(); }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (editingId) {
+        await api.patch(`/channels/${editingId}`, form);
+        toast.success("Канал обновлён");
+      } else {
+        await api.post("/channels", form);
+        toast.success("Канал добавлен");
+      }
+      setDialogOpen(false);
+      setEditingId(null);
+      setForm({ name: "", channel_type: "telegram", is_active: true, config: {} });
+      fetchChannels();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Ошибка");
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Удалить канал?")) return;
+    try {
+      await api.delete(`/channels/${id}`);
+      toast.success("Удалено");
+      fetchChannels();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Ошибка");
+    }
+  };
+
+  const openEdit = (ch: Channel) => {
+    setEditingId(ch.id);
+    setForm({ name: ch.name, channel_type: ch.channel_type, is_active: ch.is_active, config: ch.config });
+    setDialogOpen(true);
+  };
+
+  const openNew = () => {
+    setEditingId(null);
+    setForm({ name: "", channel_type: "telegram", is_active: true, config: {} });
+    setDialogOpen(true);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-100">Каналы публикации</h1>
+          <p className="text-zinc-500 mt-1">Управление каналами дистрибуции</p>
+        </div>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogTrigger asChild>
+            <Button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-500">
+              <Plus className="h-4 w-4 mr-2" /> Добавить
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="bg-zinc-900 border-zinc-800">
+            <DialogHeader>
+              <DialogTitle className="text-zinc-100">
+                {editingId ? "Редактировать канал" : "Новый канал"}
+              </DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-zinc-300">Название</Label>
+                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required className="bg-zinc-800 border-zinc-700 text-zinc-100" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-zinc-300">Тип канала</Label>
+                <Select value={form.channel_type} onValueChange={(v) => setForm({ ...form, channel_type: v })}>
+                  <SelectTrigger className="bg-zinc-800 border-zinc-700 text-zinc-100"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-zinc-800 border-zinc-700">
+                    <SelectItem value="telegram">Telegram</SelectItem>
+                    <SelectItem value="youtube">YouTube</SelectItem>
+                    <SelectItem value="website">Веб-сайт</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-3">
+                <Switch checked={form.is_active} onCheckedChange={(v) => setForm({ ...form, is_active: v })} />
+                <Label className="text-zinc-300">Активен</Label>
+              </div>
+              <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500">
+                {editingId ? "Сохранить" : "Создать"}
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <Card key={i} className="bg-zinc-900/50 border-zinc-800 animate-pulse">
+              <CardContent className="p-6 h-32" />
+            </Card>
+          ))}
+        </div>
+      ) : channels.length === 0 ? (
+        <Card className="bg-zinc-900/50 border-zinc-800 border-dashed">
+          <CardContent className="p-12 text-center">
+            <Send className="h-12 w-12 mx-auto text-zinc-600 mb-4" />
+            <h3 className="text-lg font-medium text-zinc-300">Нет каналов</h3>
+            <p className="text-zinc-500 mt-1">Добавьте канал публикации</p>
+            <Button onClick={openNew} className="mt-4 bg-indigo-600 hover:bg-indigo-500">
+              <Plus className="h-4 w-4 mr-2" /> Добавить канал
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {channels.map((ch) => {
+            const Icon = typeIcons[ch.channel_type] || Send;
+            return (
+              <Card key={ch.id} className="bg-zinc-900/50 border-zinc-800 hover:border-zinc-700 transition-all group">
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-lg bg-zinc-800 flex items-center justify-center">
+                        <Icon className="h-5 w-5 text-zinc-400" />
+                      </div>
+                      <div>
+                        <CardTitle className="text-sm font-medium text-zinc-200">{ch.name}</CardTitle>
+                        <Badge variant="outline" className={`text-xs mt-1 ${ch.is_active ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-zinc-700 text-zinc-400"}`}>
+                          {ch.is_active ? "Активен" : "Выключен"}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-500 hover:text-zinc-200" onClick={() => openEdit(ch)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-500 hover:text-red-400" onClick={() => handleDelete(ch.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="flex items-center gap-4 text-xs text-zinc-500">
+                    <span>{typeLabels[ch.channel_type]}</span>
+                    <span>{new Date(ch.created_at).toLocaleDateString("ru")}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
