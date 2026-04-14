@@ -25,7 +25,7 @@ settings = get_settings()
 
 KIE_API_URL = "https://api.kie.ai/claude/v1/messages"
 KIE_API_KEY = settings.kie_api_key
-MODEL = "claude-haiku-4-5"
+MODEL = "claude-sonnet-4-5"
 
 # Classification schema for structured output via tool_use
 CLASSIFY_TOOL = {

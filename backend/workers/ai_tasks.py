@@ -82,7 +82,7 @@ def classify_material(self, material_id: str, tenant_id: str):
         meta = {**material.metadata_}
         meta["ai_classification"] = result
         meta["classified_at"] = datetime.now(timezone.utc).isoformat()
-        meta["classified_by"] = "claude-haiku-4-5"
+        meta["classified_by"] = "claude-sonnet-4-5"
 
         material.metadata_ = meta
         material.status = "classified"
