@@ -94,6 +94,10 @@ def classify_material(self, material_id: str, tenant_id: str):
             relevance=result.get("relevance_score"),
             sentiment=result.get("sentiment"),
         )
+        
+        # Route to evaluation for all active channels in the tenant
+        evaluate_material_for_channels.delay(material_id, tenant_id)
+        
         return {
             "status": "ok",
             "category": result.get("category"),
@@ -128,3 +132,92 @@ def classify_new_materials(tenant_id: str | None = None):
 
     log.info("ai.classify_batch.done", queued=queued)
     return {"queued": queued}
+
+
+@shared_task(bind=True, name="workers.ai_tasks.evaluate_material_for_channels", max_retries=3)
+def evaluate_material_for_channels(self, material_id: str, tenant_id: str):
+    """Evaluate a classified material against all active channels for a tenant."""
+    log = logger.bind(material_id=material_id, tenant_id=tenant_id)
+    log.info("ai.evaluate_channels.start")
+
+    from app.models.channel import Channel
+    from app.models.channel_score import MaterialChannelScore
+
+    with get_sync_session() as session:
+        material = session.get(RawMaterial, uuid.UUID(material_id))
+        if not material or material.status != "classified":
+            log.error("ai.evaluate_channels.invalid_state")
+            return {"status": "error", "reason": "invalid_state"}
+
+        # Get all active channels for this tenant
+        channels = session.execute(
+            select(Channel).where(
+                Channel.tenant_id == uuid.UUID(tenant_id),
+                Channel.is_active == True,
+                Channel.editorial_guidelines != "", 
+                Channel.target_audience != ""
+            )
+        ).scalars().all()
+
+        if not channels:
+            log.info("ai.evaluate_channels.no_channels")
+            return {"status": "ok", "evaluated": 0}
+
+        from ai.editor import evaluate_material_for_channel, AIServiceTemporarilyUnavailable
+
+        # Extract material data once
+        material_data = {
+            "original_title": material.title,
+            "summary_ru": material.metadata_.get("ai_classification", {}).get("summary_ru"),
+            "summary_en": material.metadata_.get("ai_classification", {}).get("summary_en"),
+            "category": material.metadata_.get("ai_classification", {}).get("category"),
+            "tags": material.metadata_.get("ai_classification", {}).get("tags", []),
+            "sentiment": material.metadata_.get("ai_classification", {}).get("sentiment"),
+            "relevance_score": material.metadata_.get("ai_classification", {}).get("relevance_score"),
+        }
+
+        evaluated = 0
+        for channel in channels:
+            # Check if score already exists (e.g. on retry)
+            existing = session.execute(
+                select(MaterialChannelScore).where(
+                    MaterialChannelScore.material_id == material.id,
+                    MaterialChannelScore.channel_id == channel.id
+                )
+            ).scalar_one_or_none()
+
+            if existing:
+                continue
+
+            try:
+                result = _run_async(evaluate_material_for_channel(
+                    material_data=material_data,
+                    channel_guidelines=channel.editorial_guidelines,
+                    channel_audience=channel.target_audience
+                ))
+                
+                if result:
+                    score = MaterialChannelScore(
+                        material_id=material.id,
+                        channel_id=channel.id,
+                        tenant_id=material.tenant_id,
+                        relevance_score=result.get("relevance_score", 0),
+                        hype_score=result.get("hype_score", 0),
+                        is_recommended=result.get("is_recommended", False),
+                        explanation=result.get("explanation", "")
+                    )
+                    session.add(score)
+                    session.commit()
+                    evaluated += 1
+                    
+            except AIServiceTemporarilyUnavailable as e:
+                log.warning("ai.evaluate_channels.api_unavailable", error=str(e))
+                session.commit()
+                # Retry if we hit rate limits mid-loop
+                raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+            except Exception as e:
+                log.error("ai.evaluate_channels.eval_failed", channel_id=str(channel.id), error=str(e))
+                continue
+
+    log.info("ai.evaluate_channels.done", evaluated=evaluated)
+    return {"status": "ok", "evaluated": evaluated}

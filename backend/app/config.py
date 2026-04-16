@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     kling_secret_key: str = ""
 
     # ── CORS ──────────────────────────────────────
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
+    cors_origins: list[str] = ["*"]
 
     @field_validator("cors_origins", mode="before")
     @classmethod

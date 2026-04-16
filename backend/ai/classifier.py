@@ -1,4 +1,4 @@
-"""AI Classification service — uses Gemini 3 Pro via KIE.ai (OpenAI-compat API).
+"""AI Classification service — uses Claude 3.5 Sonnet via KIE.ai.
 
 Classifies raw materials:
   new → classifying → classified
@@ -23,10 +23,10 @@ from app.config import get_settings
 logger = structlog.get_logger()
 settings = get_settings()
 
-# Gemini 3 Pro via KIE.ai — OpenAI-compatible endpoint
-KIE_API_URL = "https://api.kie.ai/gemini-3-pro/v1/chat/completions"
+# Claude 3.5 Sonnet via KIE.ai — Anthropic-compatible endpoint
+KIE_API_URL = "https://api.kie.ai/claude/v1/messages"
 KIE_API_KEY = settings.kie_api_key
-MODEL = "gemini-3-pro"
+MODEL = "claude-3-5-sonnet-20241022"
 
 # Classification schema — OpenAI function calling format
 CLASSIFY_TOOL = {
@@ -106,7 +106,7 @@ class AIServiceTemporarilyUnavailable(Exception):
 
 
 async def classify_article(title: str, content: str, url: str = "") -> dict[str, Any] | None:
-    """Classify a single article using Gemini 3 Pro via KIE.ai (OpenAI-compat).
+    """Classify a single article using Claude Sonnet.
 
     Returns classification dict or None on failure.
     Raises AIServiceTemporarilyUnavailable for retryable errors.
@@ -125,15 +125,15 @@ Title: {title}
 URL: {url}
 Content: {truncated}"""
 
-    # OpenAI-compatible payload
+# OpenAI-compatible payload
     payload = {
+        "model": "gemini-3.1-pro",
         "messages": [
             {"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]},
             {"role": "user", "content": [{"type": "text", "text": user_message}]},
         ],
         "tools": [CLASSIFY_TOOL],
         "stream": False,
-        "include_thoughts": False,
     }
 
     headers = {
@@ -141,25 +141,38 @@ Content: {truncated}"""
         "Authorization": f"Bearer {KIE_API_KEY}",
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(KIE_API_URL, json=payload, headers=headers)
-            data = resp.json()
+    import random
+    import asyncio
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post("https://api.kie.ai/gemini-3.1-pro/v1/chat/completions", json=payload, headers=headers)
+                data = resp.json()
 
-            # Handle API-level errors (maintenance, rate limits)
-            if isinstance(data, dict) and data.get("code") in (500, 503, 429, 455):
-                msg = data.get("msg", "API error")
-                logger.warning("ai.classify.api_unavailable", msg=msg, title=title[:60])
-                raise AIServiceTemporarilyUnavailable(msg)
+                if isinstance(data, dict):
+                    # Handle KIE proxy level errors
+                    if data.get("code") in (500, 503, 429, 455):
+                        msg = data.get("msg", "API error")
+                        if "frequency is too high" in msg and attempt < max_retries - 1:
+                            await asyncio.sleep(random.uniform(2, 6))
+                            continue
+                        logger.warning("ai.classify.api_unavailable", msg=msg, title=title[:60])
+                        raise AIServiceTemporarilyUnavailable(msg)
 
-            resp.raise_for_status()
-    except AIServiceTemporarilyUnavailable:
-        raise  # Let it propagate for Celery retry
-    except Exception as e:
-        logger.error("ai.classify.request_failed", error=str(e), title=title[:80])
-        return None
+                resp.raise_for_status()
+                break # Success!
+        except AIServiceTemporarilyUnavailable:
+            raise
+        except Exception as e:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(random.uniform(2, 6))
+                continue
+            logger.error("ai.classify.request_failed", error=str(e), title=title[:80])
+            return None
 
-    # Extract tool_calls from OpenAI-format response
+    # Extract tool_calls from OpenAI format response
     choices = data.get("choices", [])
     if not choices:
         logger.warning("ai.classify.no_choices", title=title[:60], response=data)
@@ -172,21 +185,25 @@ Content: {truncated}"""
         func = tc.get("function", {})
         if func.get("name") == "classify_article":
             try:
-                result = json.loads(func.get("arguments", "{}"))
+                # The arguments might be returned as dict or string
+                input_data = func.get("arguments", "{}")
+                if isinstance(input_data, str):
+                    result = json.loads(input_data)
+                else:
+                    result = input_data
+                    
                 logger.info(
                     "ai.classify.success",
                     title=title[:60],
                     category=result.get("category"),
                     relevance=result.get("relevance_score"),
-                    model=data.get("model", MODEL),
-                    tokens=data.get("usage", {}).get("total_tokens"),
                 )
                 return result
             except json.JSONDecodeError as e:
                 logger.error("ai.classify.json_parse_error", error=str(e), title=title[:60])
                 return None
 
-    # Fallback: try to parse text content as JSON
+    # Fallback to pure text parsing
     text_content = message.get("content", "")
     if text_content:
         try:
@@ -227,3 +244,4 @@ async def classify_batch(
     tasks = [_classify_one(a) for a in articles]
     results = await asyncio.gather(*tasks)
     return list(results)
+
