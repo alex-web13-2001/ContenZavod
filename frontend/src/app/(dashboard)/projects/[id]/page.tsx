@@ -72,6 +72,13 @@ const platformConfig: Record<string, { icon: typeof Send; label: string; color: 
   youtube: { icon: Video, label: "YouTube", color: "var(--cz-error)" },
 };
 
+const formatLabels: Record<string, string> = {
+  short_post: "Пост",
+  longread: "Лонгрид",
+  video_script: "Видео-скрипт",
+  digest: "Дайджест",
+};
+
 const categoryLabels: Record<string, { label: string; emoji: string }> = {
   politics: { label: "Политика", emoji: "🏛️" },
   economy: { label: "Экономика", emoji: "💰" },
@@ -1453,7 +1460,7 @@ export default function ProjectDetailPage() {
                           >
                             <span>{cfg?.label}</span>
                             <span>·</span>
-                            <span>{ch.content_formats.join(", ")}</span>
+                            <span>{ch.content_formats.map(f => formatLabels[f] || f).join(", ")}</span>
                             <span>·</span>
                             <span>
                               {ch.languages.map((l) => l.toUpperCase()).join(", ")}
