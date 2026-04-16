@@ -37,6 +37,18 @@ class MaterialListResponse(BaseModel):
     sentiment: str | None = None
     is_breaking: bool = False
     classified_by: str | None = None
+    
+    # Channel specific scores (if requested)
+    channel_relevance_score: int | None = None
+    channel_hype_score: int | None = None
+    is_recommended_for_channel: bool | None = None
+    channel_explanation: str | None = None
+
+    # Project specific scores (if requested)
+    project_relevance_score: int | None = None
+    project_hype_score: int | None = None
+    is_recommended: bool | None = None
+    project_explanation: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -64,6 +76,16 @@ class MaterialListResponse(BaseModel):
                 "sentiment": ai.get("sentiment"),
                 "is_breaking": ai.get("is_breaking", False),
                 "classified_by": meta.get("classified_by") if isinstance(meta, dict) else None,
+                # Channel-level scores
+                "channel_relevance_score": getattr(data, "channel_relevance_score", None),
+                "channel_hype_score": getattr(data, "channel_hype_score", None),
+                "is_recommended_for_channel": getattr(data, "is_recommended_for_channel", None),
+                "channel_explanation": getattr(data, "channel_explanation", None),
+                # Project-level scores
+                "project_relevance_score": getattr(data, "project_relevance_score", None),
+                "project_hype_score": getattr(data, "project_hype_score", None),
+                "is_recommended": getattr(data, "is_recommended", None),
+                "project_explanation": getattr(data, "project_explanation", None),
             }
             return d
         return data

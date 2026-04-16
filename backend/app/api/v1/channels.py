@@ -15,15 +15,16 @@ router = APIRouter(prefix="/channels", tags=["channels"])
 async def list_channels(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
+    project_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
     _user: str = Depends(get_current_user_id),
 ):
-    """List all channels for the current tenant."""
+    """List all channels for the current tenant, optionally filtered by project."""
     from app.services.channel_service import ChannelService
 
     service = ChannelService(db, tenant_id)
-    items, total = await service.list(page, per_page)
+    items, total = await service.list(page, per_page, project_id)
     return {
         "items": [ChannelResponse.model_validate(c) for c in items],
         "total": total,

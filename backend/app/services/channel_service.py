@@ -14,18 +14,25 @@ class ChannelService:
         self.db = db
         self.tenant_id = uuid.UUID(tenant_id)
 
-    async def list(self, page: int = 1, per_page: int = 20) -> tuple[list[Channel], int]:
-        """List channels for the current tenant."""
+    async def list(
+        self,
+        page: int = 1,
+        per_page: int = 20,
+        project_id: str | None = None,
+    ) -> tuple[list[Channel], int]:
+        """List channels for the current tenant, optionally filtered by project."""
         offset = (page - 1) * per_page
 
-        count_q = select(func.count()).select_from(Channel).where(
-            Channel.tenant_id == self.tenant_id
-        )
+        base_filter = [Channel.tenant_id == self.tenant_id]
+        if project_id:
+            base_filter.append(Channel.project_id == uuid.UUID(project_id))
+
+        count_q = select(func.count()).select_from(Channel).where(*base_filter)
         total = (await self.db.execute(count_q)).scalar() or 0
 
         q = (
             select(Channel)
-            .where(Channel.tenant_id == self.tenant_id)
+            .where(*base_filter)
             .order_by(Channel.created_at.desc())
             .offset(offset)
             .limit(per_page)
@@ -47,10 +54,15 @@ class ChannelService:
     async def create(self, data: ChannelCreate) -> Channel:
         channel = Channel(
             tenant_id=self.tenant_id,
+            project_id=data.project_id,
             name=data.name,
             channel_type=data.channel_type,
+            content_format=data.content_format,
+            tone_of_voice=data.tone_of_voice,
+            languages=data.languages,
             config=data.config,
             posting_rules=data.posting_rules,
+            editorial_rules=data.editorial_rules,
             is_active=data.is_active,
         )
         self.db.add(channel)

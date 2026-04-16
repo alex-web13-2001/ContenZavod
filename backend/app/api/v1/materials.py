@@ -17,6 +17,9 @@ async def list_materials(
     per_page: int = Query(20, ge=1, le=100),
     status: str | None = Query(None),
     source_id: str | None = Query(None),
+    channel_id: str | None = Query(None),
+    project_id: str | None = Query(None),
+    recommended: bool | None = Query(None),
     db: AsyncSession = Depends(get_db),
     tenant_id: str = Depends(get_tenant_id),
     _user: str = Depends(get_current_user_id),
@@ -25,7 +28,10 @@ async def list_materials(
     from app.services.material_service import MaterialService
 
     service = MaterialService(db, tenant_id)
-    items, total = await service.list(page, per_page, status, source_id)
+    items, total = await service.list(
+        page, per_page, status, source_id, channel_id,
+        project_id=project_id, recommended=recommended,
+    )
     return {
         "items": [MaterialListResponse.model_validate(m) for m in items],
         "total": total,
