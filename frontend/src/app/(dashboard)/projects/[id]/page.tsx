@@ -19,6 +19,10 @@ import {
   ExternalLink,
   Plus,
   X,
+  Pencil,
+  Trash2,
+  Save,
+  Check,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -166,6 +170,88 @@ export default function ProjectDetailPage() {
       console.error(e);
     } finally {
       setChannelSaving(false);
+    }
+  };
+
+  // Channel editing
+  const [editChannelId, setEditChannelId] = useState<string | null>(null);
+  const [editChannelForm, setEditChannelForm] = useState({
+    name: "",
+    channel_type: "telegram",
+    content_formats: ["short_post"],
+    tone_of_voice: "",
+    languages: ["ru"],
+    is_active: true,
+  });
+
+  const startEditChannel = (ch: Channel) => {
+    setEditChannelId(ch.id);
+    setEditChannelForm({
+      name: ch.name,
+      channel_type: ch.channel_type,
+      content_formats: ch.content_formats,
+      tone_of_voice: ch.tone_of_voice,
+      languages: ch.languages,
+      is_active: ch.is_active,
+    });
+    setShowChannelForm(false);
+  };
+
+  const handleSaveChannel = async () => {
+    if (!editChannelId || !editChannelForm.name.trim()) return;
+    setChannelSaving(true);
+    try {
+      await api.patch(`/channels/${editChannelId}`, editChannelForm);
+      setEditChannelId(null);
+      fetchChannels();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setChannelSaving(false);
+    }
+  };
+
+  const handleDeleteChannel = async (channelId: string) => {
+    if (!confirm("Удалить канал? Это действие нельзя отменить.")) return;
+    try {
+      await api.delete(`/channels/${channelId}`);
+      fetchChannels();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Project editing
+  const [editingProject, setEditingProject] = useState(false);
+  const [projectSaving, setProjectSaving] = useState(false);
+  const [projectForm, setProjectForm] = useState({
+    name: "",
+    description: "",
+    topic_guidelines: "",
+    target_audience: "",
+  });
+
+  const startEditProject = () => {
+    if (!project) return;
+    setProjectForm({
+      name: project.name,
+      description: project.description,
+      topic_guidelines: project.topic_guidelines,
+      target_audience: project.target_audience,
+    });
+    setEditingProject(true);
+  };
+
+  const handleSaveProject = async () => {
+    setProjectSaving(true);
+    try {
+      await api.patch(`/projects/${projectId}`, projectForm);
+      setEditingProject(false);
+      fetchProject();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setProjectSaving(false);
     }
   };
 
@@ -1121,6 +1207,196 @@ export default function ProjectDetailPage() {
               {channels.map((ch) => {
                 const cfg = platformConfig[ch.channel_type];
                 const Icon = cfg?.icon || Send;
+                const isEditing = editChannelId === ch.id;
+
+                if (isEditing) {
+                  // Inline edit form
+                  return (
+                    <div
+                      key={ch.id}
+                      className="animate-page-in"
+                      style={{
+                        padding: "20px",
+                        borderRadius: "var(--cz-radius-xl)",
+                        backgroundColor: `hsl(var(--cz-bg-surface) / 0.6)`,
+                        backdropFilter: "blur(16px)",
+                        border: `1px solid hsl(var(--cz-primary) / 0.3)`,
+                        boxShadow: "var(--cz-shadow-lg)",
+                      }}
+                    >
+                      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <h4 style={{ fontSize: "14px", fontWeight: 600, color: `hsl(var(--cz-text-primary))` }}>
+                            ✏️ Редактирование канала
+                          </h4>
+                          <button
+                            onClick={() => setEditChannelId(null)}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: `hsl(var(--cz-text-muted))` }}
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+
+                        {/* Name */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>Название</label>
+                          <input
+                            type="text"
+                            value={editChannelForm.name}
+                            onChange={(e) => setEditChannelForm({ ...editChannelForm, name: e.target.value })}
+                            className="focus-ring"
+                            style={{
+                              width: "100%", height: "40px", padding: "0 14px", fontSize: "14px",
+                              fontFamily: "var(--cz-font-sans)", color: `hsl(var(--cz-text-primary))`,
+                              backgroundColor: `hsl(var(--cz-bg-input))`, border: `1px solid hsl(var(--cz-border))`,
+                              borderRadius: "var(--cz-radius-md)", outline: "none",
+                            }}
+                          />
+                        </div>
+
+                        {/* Platform cards */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>Платформа</label>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px" }}>
+                            {[
+                              { value: "telegram", icon: Send, label: "Telegram", color: "var(--cz-info)" },
+                              { value: "website", icon: Globe, label: "Сайт", color: "var(--cz-accent)" },
+                              { value: "youtube", icon: Video, label: "YouTube", color: "var(--cz-error)" },
+                            ].map((opt) => {
+                              const isActive = editChannelForm.channel_type === opt.value;
+                              return (
+                                <button key={opt.value} type="button"
+                                  onClick={() => setEditChannelForm({ ...editChannelForm, channel_type: opt.value })}
+                                  style={{
+                                    display: "flex", flexDirection: "column", alignItems: "center", gap: "6px",
+                                    padding: "12px 8px", borderRadius: "var(--cz-radius-lg)",
+                                    backgroundColor: isActive ? `hsl(${opt.color} / 0.12)` : `hsl(var(--cz-bg-hover))`,
+                                    border: isActive ? `2px solid hsl(${opt.color})` : `1px solid hsl(var(--cz-border-subtle))`,
+                                    cursor: "pointer", transition: "all 0.2s ease",
+                                  }}
+                                >
+                                  <opt.icon size={18} style={{ color: isActive ? `hsl(${opt.color})` : `hsl(var(--cz-text-muted))` }} />
+                                  <span style={{ fontSize: "11px", fontWeight: isActive ? 600 : 500, color: isActive ? `hsl(${opt.color})` : `hsl(var(--cz-text-secondary))` }}>{opt.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Content formats */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>Форматы контента</label>
+                          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                            {[
+                              { value: "short_post", label: "📝 Пост" }, { value: "longread", label: "📖 Лонгрид" },
+                              { value: "video_script", label: "🎬 Видео" }, { value: "digest", label: "📋 Дайджест" },
+                            ].map((opt) => {
+                              const isActive = editChannelForm.content_formats.includes(opt.value);
+                              return (
+                                <button key={opt.value} type="button"
+                                  onClick={() => {
+                                    const fmts = isActive ? editChannelForm.content_formats.filter(f => f !== opt.value) : [...editChannelForm.content_formats, opt.value];
+                                    if (fmts.length > 0) setEditChannelForm({ ...editChannelForm, content_formats: fmts });
+                                  }}
+                                  style={{
+                                    padding: "6px 14px", fontSize: "12px", fontWeight: isActive ? 600 : 400,
+                                    borderRadius: "var(--cz-radius-full)",
+                                    backgroundColor: isActive ? `hsl(var(--cz-primary))` : "transparent",
+                                    color: isActive ? "white" : `hsl(var(--cz-text-secondary))`,
+                                    border: isActive ? "none" : `1px solid hsl(var(--cz-border))`,
+                                    cursor: "pointer", transition: "all 0.2s ease",
+                                  }}
+                                >{opt.label}</button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Languages */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>Языки</label>
+                          <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                            {[
+                              { code: "ru", flag: "🇷🇺" }, { code: "en", flag: "🇬🇧" }, { code: "de", flag: "🇩🇪" },
+                              { code: "uk", flag: "🇺🇦" }, { code: "es", flag: "🇪🇸" }, { code: "fr", flag: "🇫🇷" }, { code: "zh", flag: "🇨🇳" },
+                            ].map((lang) => {
+                              const isSel = editChannelForm.languages.includes(lang.code);
+                              return (
+                                <button key={lang.code} type="button"
+                                  onClick={() => {
+                                    const ls = isSel ? editChannelForm.languages.filter(l => l !== lang.code) : [...editChannelForm.languages, lang.code];
+                                    if (ls.length > 0) setEditChannelForm({ ...editChannelForm, languages: ls });
+                                  }}
+                                  style={{
+                                    display: "flex", alignItems: "center", gap: "4px",
+                                    padding: "4px 10px", fontSize: "12px", fontWeight: isSel ? 600 : 400,
+                                    borderRadius: "var(--cz-radius-full)",
+                                    backgroundColor: isSel ? `hsl(var(--cz-primary) / 0.15)` : "transparent",
+                                    color: isSel ? `hsl(var(--cz-primary))` : `hsl(var(--cz-text-muted))`,
+                                    border: isSel ? `1.5px solid hsl(var(--cz-primary))` : `1px solid hsl(var(--cz-border-subtle))`,
+                                    cursor: "pointer", transition: "all 0.2s ease",
+                                  }}
+                                ><span style={{ fontSize: "14px" }}>{lang.flag}</span> {lang.code.toUpperCase()}</button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* ToV */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>Tone of Voice</label>
+                          <textarea
+                            value={editChannelForm.tone_of_voice}
+                            onChange={(e) => setEditChannelForm({ ...editChannelForm, tone_of_voice: e.target.value })}
+                            rows={2}
+                            className="focus-ring"
+                            style={{
+                              width: "100%", padding: "10px 14px", fontSize: "13px", fontFamily: "var(--cz-font-sans)",
+                              color: `hsl(var(--cz-text-primary))`, backgroundColor: `hsl(var(--cz-bg-input))`,
+                              border: `1px solid hsl(var(--cz-border))`, borderRadius: "var(--cz-radius-md)",
+                              outline: "none", resize: "vertical", lineHeight: "1.5",
+                            }}
+                          />
+                        </div>
+
+                        {/* Actions */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <button
+                            onClick={() => handleDeleteChannel(ch.id)}
+                            style={{
+                              display: "flex", alignItems: "center", gap: "6px",
+                              padding: "8px 14px", fontSize: "12px", fontWeight: 500,
+                              borderRadius: "var(--cz-radius-md)", backgroundColor: `hsl(var(--cz-error) / 0.1)`,
+                              color: `hsl(var(--cz-error))`, border: "none", cursor: "pointer",
+                            }}
+                          ><Trash2 size={13} /> Удалить</button>
+                          <div style={{ display: "flex", gap: "8px" }}>
+                            <button onClick={() => setEditChannelId(null)}
+                              style={{
+                                padding: "8px 16px", fontSize: "12px", fontWeight: 500,
+                                borderRadius: "var(--cz-radius-md)", backgroundColor: "transparent",
+                                color: `hsl(var(--cz-text-muted))`, border: `1px solid hsl(var(--cz-border))`, cursor: "pointer",
+                              }}
+                            >Отмена</button>
+                            <button onClick={handleSaveChannel} disabled={channelSaving}
+                              style={{
+                                display: "flex", alignItems: "center", gap: "6px",
+                                padding: "8px 18px", fontSize: "12px", fontWeight: 600,
+                                borderRadius: "var(--cz-radius-md)",
+                                background: "linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))",
+                                color: "white", border: "none", cursor: "pointer",
+                                opacity: channelSaving ? 0.6 : 1,
+                                boxShadow: "0 4px 16px hsl(var(--cz-primary) / 0.3)",
+                              }}
+                            ><Save size={13} /> {channelSaving ? "..." : "Сохранить"}</button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Normal channel card
                 return (
                   <CzCard key={ch.id} padding="sm">
                     <div
@@ -1185,9 +1461,23 @@ export default function ProjectDetailPage() {
                           </div>
                         </div>
                       </div>
-                      <CzBadge variant={ch.is_active ? "success" : "default"}>
-                        {ch.is_active ? "Активен" : "Выкл"}
-                      </CzBadge>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <button
+                          onClick={() => startEditChannel(ch)}
+                          title="Редактировать"
+                          style={{
+                            width: "30px", height: "30px", display: "flex", alignItems: "center", justifyContent: "center",
+                            borderRadius: "var(--cz-radius-md)", backgroundColor: `hsl(var(--cz-bg-hover))`,
+                            border: "none", cursor: "pointer", transition: "all 0.15s ease",
+                            color: `hsl(var(--cz-text-muted))`,
+                          }}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <CzBadge variant={ch.is_active ? "success" : "default"}>
+                          {ch.is_active ? "Активен" : "Выкл"}
+                        </CzBadge>
+                      </div>
                     </div>
                     {ch.tone_of_voice && (
                       <div
@@ -1214,89 +1504,160 @@ export default function ProjectDetailPage() {
 
       {tab === "settings" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <CzCard>
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "16px" }}
-            >
-              <h3
-                style={{
-                  fontSize: "16px",
-                  fontWeight: 600,
-                  color: `hsl(var(--cz-text-primary))`,
-                }}
-              >
-                Настройки проекта
-              </h3>
+          <div
+            className="animate-page-in"
+            style={{
+              padding: "24px",
+              borderRadius: "var(--cz-radius-xl)",
+              backgroundColor: `hsl(var(--cz-bg-surface) / 0.6)`,
+              backdropFilter: "blur(16px)",
+              border: `1px solid hsl(var(--cz-border-subtle))`,
+              boxShadow: "var(--cz-shadow-lg), inset 0 1px 0 hsl(var(--cz-border-subtle) / 0.5)",
+            }}
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <h3 style={{ fontSize: "16px", fontWeight: 600, color: `hsl(var(--cz-text-primary))` }}>
+                  Настройки проекта
+                </h3>
+                {!editingProject ? (
+                  <button onClick={startEditProject}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "6px",
+                      padding: "8px 16px", fontSize: "12px", fontWeight: 600,
+                      borderRadius: "var(--cz-radius-md)",
+                      background: "linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))",
+                      color: "white", border: "none", cursor: "pointer",
+                      boxShadow: "0 4px 16px hsl(var(--cz-primary) / 0.3)",
+                    }}
+                  ><Pencil size={13} /> Редактировать</button>
+                ) : (
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button onClick={() => setEditingProject(false)}
+                      style={{
+                        padding: "8px 16px", fontSize: "12px", fontWeight: 500,
+                        borderRadius: "var(--cz-radius-md)", backgroundColor: "transparent",
+                        color: `hsl(var(--cz-text-muted))`, border: `1px solid hsl(var(--cz-border))`, cursor: "pointer",
+                      }}
+                    >Отмена</button>
+                    <button onClick={handleSaveProject} disabled={projectSaving}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "6px",
+                        padding: "8px 18px", fontSize: "12px", fontWeight: 600,
+                        borderRadius: "var(--cz-radius-md)",
+                        background: "linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))",
+                        color: "white", border: "none", cursor: "pointer",
+                        opacity: projectSaving ? 0.6 : 1,
+                        boxShadow: "0 4px 16px hsl(var(--cz-primary) / 0.3)",
+                      }}
+                    ><Save size={13} /> {projectSaving ? "..." : "Сохранить"}</button>
+                  </div>
+                )}
+              </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "6px",
-                }}
-              >
-                <label
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: `hsl(var(--cz-text-secondary))`,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                  }}
-                >
+              {/* Name */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Название проекта
+                </label>
+                {editingProject ? (
+                  <input type="text" value={projectForm.name}
+                    onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })}
+                    className="focus-ring"
+                    style={{
+                      width: "100%", height: "44px", padding: "0 16px", fontSize: "14px",
+                      fontFamily: "var(--cz-font-sans)", color: `hsl(var(--cz-text-primary))`,
+                      backgroundColor: `hsl(var(--cz-bg-input))`, border: `1px solid hsl(var(--cz-border))`,
+                      borderRadius: "var(--cz-radius-md)", outline: "none",
+                    }}
+                  />
+                ) : (
+                  <div style={{
+                    padding: "10px 16px", borderRadius: "var(--cz-radius-md)",
+                    backgroundColor: `hsl(var(--cz-bg-hover))`, fontSize: "14px", fontWeight: 500,
+                    color: `hsl(var(--cz-text-primary))`,
+                  }}>{project.name}</div>
+                )}
+              </div>
+
+              {/* Description */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Описание
+                </label>
+                {editingProject ? (
+                  <textarea value={projectForm.description}
+                    onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })}
+                    rows={2} className="focus-ring"
+                    style={{
+                      width: "100%", padding: "12px 16px", fontSize: "13px",
+                      fontFamily: "var(--cz-font-sans)", color: `hsl(var(--cz-text-primary))`,
+                      backgroundColor: `hsl(var(--cz-bg-input))`, border: `1px solid hsl(var(--cz-border))`,
+                      borderRadius: "var(--cz-radius-md)", outline: "none", resize: "vertical", lineHeight: "1.6",
+                    }}
+                  />
+                ) : (
+                  <div style={{
+                    padding: "10px 16px", borderRadius: "var(--cz-radius-md)",
+                    backgroundColor: `hsl(var(--cz-bg-hover))`, fontSize: "13px", lineHeight: "1.6",
+                    color: `hsl(var(--cz-text-secondary))`, whiteSpace: "pre-wrap", minHeight: "40px",
+                  }}>{project.description || "Не задано"}</div>
+                )}
+              </div>
+
+              {/* Topic Guidelines */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   Тематика (Topic Guidelines)
                 </label>
-                <div
-                  style={{
-                    padding: "10px",
-                    borderRadius: "var(--cz-radius-md)",
-                    backgroundColor: `hsl(var(--cz-bg-hover))`,
-                    fontSize: "13px",
-                    lineHeight: "1.6",
-                    color: `hsl(var(--cz-text-secondary))`,
-                    whiteSpace: "pre-wrap",
-                    minHeight: "60px",
-                  }}
-                >
-                  {project.topic_guidelines || "Не задано"}
-                </div>
+                {editingProject ? (
+                  <textarea value={projectForm.topic_guidelines}
+                    onChange={(e) => setProjectForm({ ...projectForm, topic_guidelines: e.target.value })}
+                    rows={4} className="focus-ring"
+                    placeholder="Опишите тематику проекта, ключевые темы, что публикуем и что НЕ публикуем..."
+                    style={{
+                      width: "100%", padding: "12px 16px", fontSize: "13px",
+                      fontFamily: "var(--cz-font-sans)", color: `hsl(var(--cz-text-primary))`,
+                      backgroundColor: `hsl(var(--cz-bg-input))`, border: `1px solid hsl(var(--cz-border))`,
+                      borderRadius: "var(--cz-radius-md)", outline: "none", resize: "vertical", lineHeight: "1.6",
+                    }}
+                  />
+                ) : (
+                  <div style={{
+                    padding: "10px 16px", borderRadius: "var(--cz-radius-md)",
+                    backgroundColor: `hsl(var(--cz-bg-hover))`, fontSize: "13px", lineHeight: "1.6",
+                    color: `hsl(var(--cz-text-secondary))`, whiteSpace: "pre-wrap", minHeight: "60px",
+                  }}>{project.topic_guidelines || "Не задано"}</div>
+                )}
               </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "6px",
-                }}
-              >
-                <label
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: `hsl(var(--cz-text-secondary))`,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                  }}
-                >
+              {/* Target Audience */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   Целевая аудитория
                 </label>
-                <div
-                  style={{
-                    padding: "10px",
-                    borderRadius: "var(--cz-radius-md)",
-                    backgroundColor: `hsl(var(--cz-bg-hover))`,
-                    fontSize: "13px",
-                    lineHeight: "1.6",
-                    color: `hsl(var(--cz-text-secondary))`,
-                    whiteSpace: "pre-wrap",
-                    minHeight: "40px",
-                  }}
-                >
-                  {project.target_audience || "Не задано"}
-                </div>
+                {editingProject ? (
+                  <textarea value={projectForm.target_audience}
+                    onChange={(e) => setProjectForm({ ...projectForm, target_audience: e.target.value })}
+                    rows={3} className="focus-ring"
+                    placeholder="Кто читает? Возраст, интересы, язык, география..."
+                    style={{
+                      width: "100%", padding: "12px 16px", fontSize: "13px",
+                      fontFamily: "var(--cz-font-sans)", color: `hsl(var(--cz-text-primary))`,
+                      backgroundColor: `hsl(var(--cz-bg-input))`, border: `1px solid hsl(var(--cz-border))`,
+                      borderRadius: "var(--cz-radius-md)", outline: "none", resize: "vertical", lineHeight: "1.6",
+                    }}
+                  />
+                ) : (
+                  <div style={{
+                    padding: "10px 16px", borderRadius: "var(--cz-radius-md)",
+                    backgroundColor: `hsl(var(--cz-bg-hover))`, fontSize: "13px", lineHeight: "1.6",
+                    color: `hsl(var(--cz-text-secondary))`, whiteSpace: "pre-wrap", minHeight: "40px",
+                  }}>{project.target_audience || "Не задано"}</div>
+                )}
               </div>
             </div>
-          </CzCard>
+          </div>
         </div>
       )}
     </div>
