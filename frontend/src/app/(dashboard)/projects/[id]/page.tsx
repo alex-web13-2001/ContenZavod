@@ -800,117 +800,201 @@ export default function ProjectDetailPage() {
 
           {/* Channel creation form */}
           {showChannelForm && (
-            <CzCard>
-              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                <h3 style={{ fontSize: "15px", fontWeight: 600, color: `hsl(var(--cz-text-primary))` }}>
-                  Новый канал
-                </h3>
+            <div
+              className="animate-page-in"
+              style={{
+                padding: "24px",
+                borderRadius: "var(--cz-radius-xl)",
+                backgroundColor: `hsl(var(--cz-bg-surface) / 0.6)`,
+                backdropFilter: "blur(16px)",
+                border: `1px solid hsl(var(--cz-border-subtle))`,
+                boxShadow: "var(--cz-shadow-lg), inset 0 1px 0 hsl(var(--cz-border-subtle) / 0.5)",
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                {/* Header */}
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div
+                    style={{
+                      width: "32px",
+                      height: "32px",
+                      borderRadius: "var(--cz-radius-md)",
+                      background: "linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Plus size={16} style={{ color: "white" }} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: "16px", fontWeight: 600, color: `hsl(var(--cz-text-primary))`, letterSpacing: "-0.01em" }}>
+                      Новый канал
+                    </h3>
+                    <p style={{ fontSize: "12px", color: `hsl(var(--cz-text-muted))`, marginTop: "1px" }}>
+                      Настройте платформу и стиль контента
+                    </p>
+                  </div>
+                </div>
 
-                {/* Name */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <label style={{ fontSize: "12px", fontWeight: 500, color: `hsl(var(--cz-text-secondary))` }}>Название *</label>
+                {/* Name input */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Название канала
+                  </label>
                   <input
                     type="text"
-                    placeholder="Например: Мой ТГ-канал про крипту"
+                    placeholder="@mychannel или название"
                     value={channelForm.name}
                     onChange={(e) => setChannelForm({ ...channelForm, name: e.target.value })}
+                    className="focus-ring"
                     style={{
                       width: "100%",
-                      height: "40px",
-                      padding: "0 12px",
+                      height: "44px",
+                      padding: "0 16px",
                       fontSize: "14px",
+                      fontFamily: "var(--cz-font-sans)",
                       color: `hsl(var(--cz-text-primary))`,
                       backgroundColor: `hsl(var(--cz-bg-input))`,
                       border: `1px solid hsl(var(--cz-border))`,
                       borderRadius: "var(--cz-radius-md)",
                       outline: "none",
-                      fontFamily: "var(--cz-font-sans)",
+                      transition: "all var(--cz-duration-fast) var(--cz-ease)",
                     }}
                   />
                 </div>
 
-                {/* Type + Format row */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    <label style={{ fontSize: "12px", fontWeight: 500, color: `hsl(var(--cz-text-secondary))` }}>Тип канала</label>
-                    <select
-                      value={channelForm.channel_type}
-                      onChange={(e) => setChannelForm({ ...channelForm, channel_type: e.target.value })}
-                      style={{
-                        width: "100%",
-                        height: "40px",
-                        padding: "0 12px",
-                        fontSize: "13px",
-                        color: `hsl(var(--cz-text-primary))`,
-                        backgroundColor: `hsl(var(--cz-bg-input))`,
-                        border: `1px solid hsl(var(--cz-border))`,
-                        borderRadius: "var(--cz-radius-md)",
-                        outline: "none",
-                        fontFamily: "var(--cz-font-sans)",
-                      }}
-                    >
-                      <option value="telegram">📱 Telegram</option>
-                      <option value="website">🌐 Сайт</option>
-                      <option value="youtube">🎬 YouTube</option>
-                    </select>
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    <label style={{ fontSize: "12px", fontWeight: 500, color: `hsl(var(--cz-text-secondary))` }}>Формат контента</label>
-                    <select
-                      value={channelForm.content_format}
-                      onChange={(e) => setChannelForm({ ...channelForm, content_format: e.target.value })}
-                      style={{
-                        width: "100%",
-                        height: "40px",
-                        padding: "0 12px",
-                        fontSize: "13px",
-                        color: `hsl(var(--cz-text-primary))`,
-                        backgroundColor: `hsl(var(--cz-bg-input))`,
-                        border: `1px solid hsl(var(--cz-border))`,
-                        borderRadius: "var(--cz-radius-md)",
-                        outline: "none",
-                        fontFamily: "var(--cz-font-sans)",
-                      }}
-                    >
-                      <option value="short_post">Короткий пост</option>
-                      <option value="longread">Лонгрид</option>
-                      <option value="video_script">Видео-скрипт</option>
-                      <option value="digest">Дайджест</option>
-                    </select>
+                {/* Channel type — card selector */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Платформа
+                  </label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+                    {[
+                      { value: "telegram", icon: Send, label: "Telegram", color: "var(--cz-info)" },
+                      { value: "website", icon: Globe, label: "Сайт", color: "var(--cz-accent)" },
+                      { value: "youtube", icon: Video, label: "YouTube", color: "var(--cz-error)" },
+                    ].map((opt) => {
+                      const isActive = channelForm.channel_type === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setChannelForm({ ...channelForm, channel_type: opt.value })}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            gap: "8px",
+                            padding: "16px 12px",
+                            borderRadius: "var(--cz-radius-lg)",
+                            backgroundColor: isActive ? `hsl(${opt.color} / 0.12)` : `hsl(var(--cz-bg-hover))`,
+                            border: isActive ? `2px solid hsl(${opt.color})` : `1px solid hsl(var(--cz-border-subtle))`,
+                            cursor: "pointer",
+                            transition: "all 0.2s ease",
+                            transform: isActive ? "scale(1.02)" : "scale(1)",
+                          }}
+                        >
+                          <opt.icon
+                            size={22}
+                            style={{ color: isActive ? `hsl(${opt.color})` : `hsl(var(--cz-text-muted))` }}
+                          />
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              fontWeight: isActive ? 600 : 500,
+                              color: isActive ? `hsl(${opt.color})` : `hsl(var(--cz-text-secondary))`,
+                            }}
+                          >
+                            {opt.label}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* Languages */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <label style={{ fontSize: "12px", fontWeight: 500, color: `hsl(var(--cz-text-secondary))` }}>Языки</label>
-                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                    {["ru", "en", "de", "uk", "es", "fr", "zh"].map((lang) => {
-                      const isSelected = channelForm.languages.includes(lang);
+                {/* Content format — pill selector */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Формат контента
+                  </label>
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                    {[
+                      { value: "short_post", label: "📝 Короткий пост" },
+                      { value: "longread", label: "📖 Лонгрид" },
+                      { value: "video_script", label: "🎬 Видео-скрипт" },
+                      { value: "digest", label: "📋 Дайджест" },
+                    ].map((opt) => {
+                      const isActive = channelForm.content_format === opt.value;
                       return (
                         <button
-                          key={lang}
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setChannelForm({ ...channelForm, content_format: opt.value })}
+                          style={{
+                            padding: "8px 16px",
+                            fontSize: "13px",
+                            fontWeight: isActive ? 600 : 400,
+                            borderRadius: "var(--cz-radius-full)",
+                            backgroundColor: isActive ? `hsl(var(--cz-primary))` : "transparent",
+                            color: isActive ? "white" : `hsl(var(--cz-text-secondary))`,
+                            border: isActive ? "none" : `1px solid hsl(var(--cz-border))`,
+                            cursor: "pointer",
+                            transition: "all 0.2s ease",
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Languages — flag pills */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Языки контента
+                  </label>
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                    {[
+                      { code: "ru", flag: "🇷🇺", label: "RU" },
+                      { code: "en", flag: "🇬🇧", label: "EN" },
+                      { code: "de", flag: "🇩🇪", label: "DE" },
+                      { code: "uk", flag: "🇺🇦", label: "UA" },
+                      { code: "es", flag: "🇪🇸", label: "ES" },
+                      { code: "fr", flag: "🇫🇷", label: "FR" },
+                      { code: "zh", flag: "🇨🇳", label: "ZH" },
+                    ].map((lang) => {
+                      const isSelected = channelForm.languages.includes(lang.code);
+                      return (
+                        <button
+                          key={lang.code}
                           type="button"
                           onClick={() => {
                             const langs = isSelected
-                              ? channelForm.languages.filter((l) => l !== lang)
-                              : [...channelForm.languages, lang];
+                              ? channelForm.languages.filter((l) => l !== lang.code)
+                              : [...channelForm.languages, lang.code];
                             if (langs.length > 0) setChannelForm({ ...channelForm, languages: langs });
                           }}
                           style={{
-                            padding: "4px 12px",
-                            fontSize: "12px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            padding: "6px 14px",
+                            fontSize: "13px",
                             fontWeight: isSelected ? 600 : 400,
                             borderRadius: "var(--cz-radius-full)",
-                            backgroundColor: isSelected ? `hsl(var(--cz-primary))` : `hsl(var(--cz-bg-hover))`,
-                            color: isSelected ? "white" : `hsl(var(--cz-text-secondary))`,
-                            border: isSelected ? "none" : `1px solid hsl(var(--cz-border))`,
+                            backgroundColor: isSelected ? `hsl(var(--cz-primary) / 0.15)` : "transparent",
+                            color: isSelected ? `hsl(var(--cz-primary))` : `hsl(var(--cz-text-muted))`,
+                            border: isSelected ? `1.5px solid hsl(var(--cz-primary))` : `1px solid hsl(var(--cz-border-subtle))`,
                             cursor: "pointer",
-                            transition: "all 0.15s ease",
-                            textTransform: "uppercase",
+                            transition: "all 0.2s ease",
+                            transform: isSelected ? "scale(1.05)" : "scale(1)",
                           }}
                         >
-                          {lang}
+                          <span style={{ fontSize: "16px" }}>{lang.flag}</span>
+                          {lang.label}
                         </button>
                       );
                     })}
@@ -918,36 +1002,46 @@ export default function ProjectDetailPage() {
                 </div>
 
                 {/* Tone of voice */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <label style={{ fontSize: "12px", fontWeight: 500, color: `hsl(var(--cz-text-secondary))` }}>Tone of Voice</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Tone of Voice
+                  </label>
+                  <p style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))`, margin: 0 }}>
+                    Опишите стиль: формальный / неформальный, с юмором, emoji и т.д.
+                  </p>
                   <textarea
-                    placeholder="Например: Информационный, но с лёгким юмором. Без канцеляризмов. Короткие абзацы, emoji допустимы."
+                    placeholder="Информативный деловой тон с элементами живого языка. Короткие абзацы, допустимы emoji для акцентов."
                     value={channelForm.tone_of_voice}
                     onChange={(e) => setChannelForm({ ...channelForm, tone_of_voice: e.target.value })}
                     rows={3}
+                    className="focus-ring"
                     style={{
                       width: "100%",
-                      padding: "10px 12px",
+                      padding: "12px 16px",
                       fontSize: "13px",
+                      fontFamily: "var(--cz-font-sans)",
                       color: `hsl(var(--cz-text-primary))`,
                       backgroundColor: `hsl(var(--cz-bg-input))`,
                       border: `1px solid hsl(var(--cz-border))`,
                       borderRadius: "var(--cz-radius-md)",
                       outline: "none",
-                      fontFamily: "var(--cz-font-sans)",
                       resize: "vertical",
-                      lineHeight: "1.5",
+                      lineHeight: "1.6",
+                      transition: "all var(--cz-duration-fast) var(--cz-ease)",
                     }}
                   />
                 </div>
 
-                {/* Submit button */}
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                {/* Divider */}
+                <div style={{ height: "1px", backgroundColor: `hsl(var(--cz-border-subtle))` }} />
+
+                {/* Actions */}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
                   <button
                     type="button"
                     onClick={() => setShowChannelForm(false)}
                     style={{
-                      padding: "8px 16px",
+                      padding: "10px 20px",
                       fontSize: "13px",
                       fontWeight: 500,
                       borderRadius: "var(--cz-radius-md)",
@@ -955,6 +1049,7 @@ export default function ProjectDetailPage() {
                       color: `hsl(var(--cz-text-muted))`,
                       border: `1px solid hsl(var(--cz-border))`,
                       cursor: "pointer",
+                      transition: "all 0.2s ease",
                     }}
                   >
                     Отмена
@@ -964,23 +1059,26 @@ export default function ProjectDetailPage() {
                     onClick={handleCreateChannel}
                     disabled={!channelForm.name.trim() || channelSaving}
                     style={{
-                      padding: "8px 20px",
+                      padding: "10px 24px",
                       fontSize: "13px",
                       fontWeight: 600,
                       borderRadius: "var(--cz-radius-md)",
-                      backgroundColor: !channelForm.name.trim() ? `hsl(var(--cz-text-muted))` : `hsl(var(--cz-success))`,
+                      background: !channelForm.name.trim()
+                        ? `hsl(var(--cz-text-muted) / 0.3)`
+                        : "linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))",
                       color: "white",
                       border: "none",
                       cursor: !channelForm.name.trim() ? "not-allowed" : "pointer",
                       opacity: channelSaving ? 0.6 : 1,
                       transition: "all 0.2s ease",
+                      boxShadow: channelForm.name.trim() ? "0 4px 16px hsl(var(--cz-primary) / 0.3)" : "none",
                     }}
                   >
-                    {channelSaving ? "Сохранение..." : "Создать канал"}
+                    {channelSaving ? "Сохранение..." : "✨ Создать канал"}
                   </button>
                 </div>
               </div>
-            </CzCard>
+            </div>
           )}
 
           {channels.length === 0 ? (
