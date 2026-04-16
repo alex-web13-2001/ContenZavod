@@ -30,7 +30,14 @@ class ApiClient {
 
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      throw new Error(data.detail || `Ошибка ${res.status}`);
+      // FastAPI 422 returns detail as array of validation errors
+      let message = `Ошибка ${res.status}`;
+      if (typeof data.detail === "string") {
+        message = data.detail;
+      } else if (Array.isArray(data.detail)) {
+        message = data.detail.map((e: { msg?: string }) => e.msg || "").filter(Boolean).join("; ");
+      }
+      throw new Error(message);
     }
 
     if (res.status === 204) return undefined as T;

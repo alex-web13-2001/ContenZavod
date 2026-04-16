@@ -14,13 +14,30 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
+    // Fallback for browser autofill: read values from DOM if React state is empty
+    let loginEmail = email;
+    let loginPassword = password;
+    if (!loginEmail || !loginPassword) {
+      const form = e.currentTarget;
+      const emailInput = form.querySelector<HTMLInputElement>('input[type="email"]');
+      const passInput = form.querySelector<HTMLInputElement>('input[type="password"]');
+      if (emailInput && !loginEmail) loginEmail = emailInput.value;
+      if (passInput && !loginPassword) loginPassword = passInput.value;
+    }
+
+    if (!loginEmail || !loginPassword) {
+      setError("Введите email и пароль");
+      setLoading(false);
+      return;
+    }
+
     try {
-      await login(email, password);
+      await login(loginEmail, loginPassword);
       router.push("/");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Ошибка входа");
@@ -123,6 +140,8 @@ export default function LoginPage() {
             onChange={(e) => setEmail(e.target.value)}
             required
             icon={<Mail size={18} />}
+            autoComplete="email"
+            name="email"
           />
 
           <CzInput
@@ -133,6 +152,8 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
             icon={<Lock size={18} />}
+            autoComplete="current-password"
+            name="password"
           />
 
           <CzButton type="submit" loading={loading} fullWidth size="lg">
