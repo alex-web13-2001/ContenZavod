@@ -93,3 +93,66 @@ async def delete_project(
     deleted = await service.delete(project_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Project not found")
+
+
+@router.get("/{project_id}/recommendations")
+async def list_project_recommendations(
+    project_id: str,
+    recommended_only: bool = Query(True),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(30, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _user: str = Depends(get_current_user_id),
+):
+    """List materials scored for this project, optionally filtered to recommended only."""
+    import uuid as _uuid
+    from sqlalchemy import select, func
+    from app.models.project_score import MaterialProjectScore
+    from app.models.material import RawMaterial
+
+    tid = _uuid.UUID(tenant_id)
+    pid = _uuid.UUID(project_id)
+
+    query = (
+        select(MaterialProjectScore)
+        .where(
+            MaterialProjectScore.project_id == pid,
+            MaterialProjectScore.tenant_id == tid,
+        )
+    )
+
+    if recommended_only:
+        query = query.where(MaterialProjectScore.is_recommended == True)
+
+    query = query.order_by(MaterialProjectScore.created_at.desc())
+
+    # Count
+    count_q = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_q)).scalar() or 0
+
+    # Paginate
+    offset = (page - 1) * per_page
+    result = await db.execute(query.offset(offset).limit(per_page))
+    scores = result.scalars().all()
+
+    # Enrich with material data
+    items = []
+    for s in scores:
+        material = await db.get(RawMaterial, s.material_id)
+        items.append({
+            "id": str(s.id),
+            "material_id": str(s.material_id),
+            "project_id": str(s.project_id),
+            "relevance_score": s.relevance_score,
+            "hype_score": s.hype_score,
+            "is_recommended": s.is_recommended,
+            "explanation": s.explanation,
+            "created_at": s.created_at.isoformat(),
+            "material_title": material.title if material else None,
+            "material_url": material.original_url if material else None,
+            "material_status": material.status if material else None,
+        })
+
+    return {"items": items, "total": total, "page": page, "per_page": per_page}
+

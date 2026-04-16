@@ -9,6 +9,7 @@ from app.api.v1.health import router as health_router
 from app.api.v1.materials import router as materials_router
 from app.api.v1.projects import router as projects_router
 from app.api.v1.sources import router as sources_router
+from app.api.v1.adaptations import router as adaptations_router
 
 api_router = APIRouter()
 
@@ -19,3 +20,5 @@ api_router.include_router(sources_router)
 api_router.include_router(materials_router)
 api_router.include_router(projects_router)
 api_router.include_router(channels_router)
+api_router.include_router(adaptations_router)
+

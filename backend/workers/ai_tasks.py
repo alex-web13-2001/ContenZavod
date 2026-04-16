@@ -1,8 +1,10 @@
-"""AI classification Celery tasks.
+"""AI classification and editorial Celery tasks.
 
 Task flow:
-    classify_material(material_id, tenant_id) → call Claude → update status & metadata
+    classify_material(material_id, tenant_id) → call Gemini → update status & metadata
     classify_new_materials(tenant_id) → find all "new" → fan-out to classify_material
+    evaluate_material_for_projects(material_id, tenant_id) → score for all projects
+    adapt_material_for_channels(material_id, project_id, tenant_id) → generate content
 """
 
 import asyncio
@@ -11,7 +13,7 @@ from datetime import datetime, timezone
 
 import structlog
 from celery import shared_task
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from app.database import get_sync_session
 from app.models.material import RawMaterial
@@ -94,10 +96,10 @@ def classify_material(self, material_id: str, tenant_id: str):
             relevance=result.get("relevance_score"),
             sentiment=result.get("sentiment"),
         )
-        
-        # Route to evaluation for all active channels in the tenant
-        evaluate_material_for_channels.delay(material_id, tenant_id)
-        
+
+        # Auto-route to project scoring
+        evaluate_material_for_projects.delay(material_id, tenant_id)
+
         return {
             "status": "ok",
             "category": result.get("category"),
@@ -107,10 +109,7 @@ def classify_material(self, material_id: str, tenant_id: str):
 
 @shared_task(name="workers.ai_tasks.classify_new_materials")
 def classify_new_materials(tenant_id: str | None = None):
-    """Find all materials with status 'new' and queue classification.
-
-    If tenant_id is None, classifies for all tenants.
-    """
+    """Find all materials with status 'new' and queue classification."""
     log = logger.bind(tenant_id=tenant_id)
     log.info("ai.classify_batch.start")
 
@@ -121,7 +120,6 @@ def classify_new_materials(tenant_id: str | None = None):
         if tenant_id:
             query = query.where(RawMaterial.tenant_id == uuid.UUID(tenant_id))
 
-        # Limit batch to avoid overwhelming the API
         query = query.limit(50)
         materials = session.execute(query).all()
 
@@ -134,90 +132,222 @@ def classify_new_materials(tenant_id: str | None = None):
     return {"queued": queued}
 
 
-@shared_task(bind=True, name="workers.ai_tasks.evaluate_material_for_channels", max_retries=3)
-def evaluate_material_for_channels(self, material_id: str, tenant_id: str):
-    """Evaluate a classified material against all active channels for a tenant."""
-    log = logger.bind(material_id=material_id, tenant_id=tenant_id)
-    log.info("ai.evaluate_channels.start")
+@shared_task(bind=True, name="workers.ai_tasks.evaluate_material_for_projects", max_retries=3)
+def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
+    """Evaluate a classified material against all active projects for a tenant.
 
-    from app.models.channel import Channel
-    from app.models.channel_score import MaterialChannelScore
+    For each project with topic_guidelines set:
+    - Call AI to score relevance + hype
+    - Store result in MaterialProjectScore
+    - If recommended → trigger adapt_material_for_channels
+    """
+    log = logger.bind(material_id=material_id, tenant_id=tenant_id)
+    log.info("ai.evaluate_projects.start")
+
+    from app.models.project import Project
+    from app.models.project_score import MaterialProjectScore
 
     with get_sync_session() as session:
         material = session.get(RawMaterial, uuid.UUID(material_id))
         if not material or material.status != "classified":
-            log.error("ai.evaluate_channels.invalid_state")
+            log.error("ai.evaluate_projects.invalid_state", status=material.status if material else None)
             return {"status": "error", "reason": "invalid_state"}
 
-        # Get all active channels for this tenant
-        channels = session.execute(
-            select(Channel).where(
-                Channel.tenant_id == uuid.UUID(tenant_id),
-                Channel.is_active == True,
-                Channel.editorial_guidelines != "", 
-                Channel.target_audience != ""
+        # Get all active projects for this tenant that have guidelines set
+        projects = session.execute(
+            select(Project).where(
+                Project.tenant_id == uuid.UUID(tenant_id),
+                Project.is_active == True,
+                Project.topic_guidelines != "",
             )
         ).scalars().all()
 
-        if not channels:
-            log.info("ai.evaluate_channels.no_channels")
+        if not projects:
+            log.info("ai.evaluate_projects.no_projects")
             return {"status": "ok", "evaluated": 0}
 
-        from ai.editor import evaluate_material_for_channel, AIServiceTemporarilyUnavailable
+        from ai.editor import evaluate_material_for_project, AIServiceTemporarilyUnavailable
 
         # Extract material data once
+        ai_data = material.metadata_.get("ai_classification", {})
         material_data = {
             "original_title": material.title,
-            "summary_ru": material.metadata_.get("ai_classification", {}).get("summary_ru"),
-            "summary_en": material.metadata_.get("ai_classification", {}).get("summary_en"),
-            "category": material.metadata_.get("ai_classification", {}).get("category"),
-            "tags": material.metadata_.get("ai_classification", {}).get("tags", []),
-            "sentiment": material.metadata_.get("ai_classification", {}).get("sentiment"),
-            "relevance_score": material.metadata_.get("ai_classification", {}).get("relevance_score"),
+            "summary_ru": ai_data.get("summary_ru"),
+            "summary_en": ai_data.get("summary_en"),
+            "category": ai_data.get("category"),
+            "tags": ai_data.get("tags", []),
+            "sentiment": ai_data.get("sentiment"),
+            "relevance_score": ai_data.get("relevance_score"),
         }
 
         evaluated = 0
-        for channel in channels:
-            # Check if score already exists (e.g. on retry)
+        for project in projects:
+            # Check if score already exists (idempotency)
             existing = session.execute(
-                select(MaterialChannelScore).where(
-                    MaterialChannelScore.material_id == material.id,
-                    MaterialChannelScore.channel_id == channel.id
+                select(MaterialProjectScore).where(
+                    MaterialProjectScore.material_id == material.id,
+                    MaterialProjectScore.project_id == project.id,
                 )
             ).scalar_one_or_none()
 
             if existing:
+                log.debug("ai.evaluate_projects.already_scored", project_id=str(project.id))
                 continue
 
             try:
-                result = _run_async(evaluate_material_for_channel(
+                result = _run_async(evaluate_material_for_project(
                     material_data=material_data,
-                    channel_guidelines=channel.editorial_guidelines,
-                    channel_audience=channel.target_audience
+                    topic_guidelines=project.topic_guidelines,
+                    target_audience=project.target_audience,
                 ))
-                
+
                 if result:
-                    score = MaterialChannelScore(
+                    score = MaterialProjectScore(
                         material_id=material.id,
-                        channel_id=channel.id,
+                        project_id=project.id,
                         tenant_id=material.tenant_id,
                         relevance_score=result.get("relevance_score", 0),
                         hype_score=result.get("hype_score", 0),
                         is_recommended=result.get("is_recommended", False),
-                        explanation=result.get("explanation", "")
+                        explanation=result.get("explanation", ""),
                     )
                     session.add(score)
                     session.commit()
                     evaluated += 1
-                    
+
+                    log.info(
+                        "ai.evaluate_projects.scored",
+                        project=project.name,
+                        relevance=result.get("relevance_score"),
+                        hype=result.get("hype_score"),
+                        recommended=result.get("is_recommended"),
+                    )
+
+                    # If recommended → auto-adapt for all channels in this project
+                    if result.get("is_recommended"):
+                        adapt_material_for_channels.delay(
+                            material_id, str(project.id), tenant_id
+                        )
+
             except AIServiceTemporarilyUnavailable as e:
-                log.warning("ai.evaluate_channels.api_unavailable", error=str(e))
+                log.warning("ai.evaluate_projects.api_unavailable", error=str(e))
                 session.commit()
-                # Retry if we hit rate limits mid-loop
                 raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
             except Exception as e:
-                log.error("ai.evaluate_channels.eval_failed", channel_id=str(channel.id), error=str(e))
+                log.error("ai.evaluate_projects.eval_failed", project_id=str(project.id), error=str(e))
                 continue
 
-    log.info("ai.evaluate_channels.done", evaluated=evaluated)
+    log.info("ai.evaluate_projects.done", evaluated=evaluated)
     return {"status": "ok", "evaluated": evaluated}
+
+
+@shared_task(bind=True, name="workers.ai_tasks.adapt_material_for_channels", max_retries=3)
+def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_id: str):
+    """Generate adapted content for all channels × formats × languages in a project.
+
+    For each active channel:
+      For each content_format:
+        For each language:
+          → Call AI adapter → Store ChannelAdaptation
+    """
+    log = logger.bind(material_id=material_id, project_id=project_id)
+    log.info("ai.adapt_channels.start")
+
+    from app.models.channel import Channel
+    from app.models.channel_adaptation import ChannelAdaptation
+
+    with get_sync_session() as session:
+        material = session.get(RawMaterial, uuid.UUID(material_id))
+        if not material:
+            log.error("ai.adapt_channels.material_not_found")
+            return {"status": "error", "reason": "not_found"}
+
+        # Get all active channels for this project
+        channels = session.execute(
+            select(Channel).where(
+                Channel.project_id == uuid.UUID(project_id),
+                Channel.is_active == True,
+            )
+        ).scalars().all()
+
+        if not channels:
+            log.info("ai.adapt_channels.no_channels")
+            return {"status": "ok", "adapted": 0}
+
+        from ai.adapter import adapt_material_for_channel, AIServiceTemporarilyUnavailable
+
+        # Prepare material data
+        ai_data = material.metadata_.get("ai_classification", {})
+        material_data = {
+            "original_title": material.title,
+            "summary_ru": ai_data.get("summary_ru"),
+            "summary_en": ai_data.get("summary_en"),
+            "content_text": material.content_text,
+            "original_url": material.original_url,
+        }
+
+        adapted = 0
+        for channel in channels:
+            for content_format in channel.content_formats:
+                for language in channel.languages:
+                    # Check if adaptation already exists (idempotency)
+                    existing = session.execute(
+                        select(ChannelAdaptation).where(
+                            ChannelAdaptation.material_id == material.id,
+                            ChannelAdaptation.channel_id == channel.id,
+                            ChannelAdaptation.language == language,
+                            ChannelAdaptation.content_format == content_format,
+                        )
+                    ).scalar_one_or_none()
+
+                    if existing:
+                        continue
+
+                    try:
+                        result = _run_async(adapt_material_for_channel(
+                            material_data=material_data,
+                            channel_name=channel.name,
+                            channel_type=channel.channel_type,
+                            content_format=content_format,
+                            tone_of_voice=channel.tone_of_voice,
+                            language=language,
+                        ))
+
+                        if result:
+                            adaptation = ChannelAdaptation(
+                                material_id=material.id,
+                                channel_id=channel.id,
+                                tenant_id=material.tenant_id,
+                                language=language,
+                                content_format=content_format,
+                                headline=result.get("headline", ""),
+                                body=result.get("body", ""),
+                                priority=result.get("priority", "normal"),
+                                status="draft",
+                            )
+                            session.add(adaptation)
+                            session.commit()
+                            adapted += 1
+
+                            log.info(
+                                "ai.adapt_channels.created",
+                                channel=channel.name,
+                                format=content_format,
+                                language=language,
+                                priority=result.get("priority"),
+                            )
+
+                    except AIServiceTemporarilyUnavailable as e:
+                        log.warning("ai.adapt_channels.api_unavailable", error=str(e))
+                        session.commit()
+                        raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+                    except Exception as e:
+                        log.error(
+                            "ai.adapt_channels.adapt_failed",
+                            channel=channel.name, language=language,
+                            error=str(e),
+                        )
+                        continue
+
+    log.info("ai.adapt_channels.done", adapted=adapted)
+    return {"status": "ok", "adapted": adapted}

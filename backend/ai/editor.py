@@ -1,11 +1,10 @@
-"""AI Editor service — evaluates materials for channels.
+"""AI Editor service — evaluates materials for projects.
 
 Uses Gemini 3.1 Pro via KIE.ai to generate hype and relevance scores
-based on channel-specific editorial guidelines.
+based on project-specific topic guidelines and target audience.
 """
 
 import json
-import uuid
 from typing import Any
 
 import httpx
@@ -19,19 +18,19 @@ settings = get_settings()
 KIE_API_URL = "https://api.kie.ai/gemini-3.1-pro/v1/chat/completions"
 KIE_API_KEY = settings.kie_api_key
 
-SYSTEM_PROMPT = """You are an expert Chief Editor for multiple specific channels.
+SYSTEM_PROMPT = """You are an expert Chief Editor for a news/content project.
 Your job is to evaluate incoming raw materials and determine how perfectly they
-fit a specific channel's target audience and editorial guidelines.
+fit the project's target audience and editorial guidelines.
 
 You MUST be ruthlessly honest. If a material is garbage or irrelevant to the
-audience, penalize it heavily.
+audience, penalize it heavily. If it's a perfect match — give high scores.
 
 You must assign two scores (0 to 10):
-- relevance_score: How closely the topic aligns with the channel's target audience and guidelines.
+- relevance_score: How closely the topic aligns with the project's guidelines and audience.
 - hype_score: How exciting, viral, dramatic, or engaging this specific story is, assuming it is relevant.
 
-To recommend a story, it should ideally have high relevance.
-You MUST provide a short 1-sentence explanation of why it fits or does not fit.
+A material is recommended if relevance >= 7 AND hype >= 5.
+You MUST provide a short 1-2 sentence explanation in the SAME LANGUAGE as the material summary.
 
 Always call the evaluate_material tool with your analysis.
 """
@@ -40,13 +39,13 @@ EVALUATE_TOOL = {
     "type": "function",
     "function": {
         "name": "evaluate_material",
-        "description": "Evaluate a material's fitness for a specific channel",
+        "description": "Evaluate a material's fitness for a specific project",
         "parameters": {
             "type": "object",
             "properties": {
                 "relevance_score": {
                     "type": "integer",
-                    "description": "Relevance to the channel's audience (0-10)",
+                    "description": "Relevance to the project's audience (0-10)",
                 },
                 "hype_score": {
                     "type": "integer",
@@ -54,7 +53,7 @@ EVALUATE_TOOL = {
                 },
                 "is_recommended": {
                     "type": "boolean",
-                    "description": "True if relevance >= 7 and hype >= 6",
+                    "description": "True if relevance >= 7 and hype >= 5",
                 },
                 "explanation": {
                     "type": "string",
@@ -66,24 +65,25 @@ EVALUATE_TOOL = {
     },
 }
 
+
 class AIServiceTemporarilyUnavailable(Exception):
     """Raised when the AI API is temporarily unavailable (maintenance, rate limit)."""
     pass
 
-async def evaluate_material_for_channel(
-    material_data: dict[str, Any], channel_guidelines: str, channel_audience: str
+
+async def evaluate_material_for_project(
+    material_data: dict[str, Any], topic_guidelines: str, target_audience: str
 ) -> dict[str, Any] | None:
-    """Evaluate a single material using Gemini 3.1 Pro via KIE.ai."""
+    """Evaluate a single material against a project's guidelines using Gemini 3.1 Pro."""
     if not KIE_API_KEY:
         logger.error("ai.evaluate.no_api_key")
         return None
 
-    # Construct the payload for the prompt
-    user_message = f"""Evaluate this material for the channel.
+    user_message = f"""Evaluate this material for the content project.
     
---- CHANNEL PROFILE ---
-Target Audience: {channel_audience}
-Editorial Guidelines: {channel_guidelines}
+--- PROJECT PROFILE ---
+Topic Guidelines: {topic_guidelines}
+Target Audience: {target_audience}
 
 --- MATERIAL ---
 Original Title: {material_data.get('original_title')}
@@ -118,7 +118,7 @@ Relevance (General): {material_data.get('relevance_score')}
         return None
 
     if resp.status_code in [429, 500, 503, 504]:
-        logger.warning(f"ai.evaluate.temporarily_unavailable", status=resp.status_code)
+        logger.warning("ai.evaluate.temporarily_unavailable", status=resp.status_code)
         raise AIServiceTemporarilyUnavailable(f"Status {resp.status_code}")
 
     if resp.status_code != 200:
@@ -127,23 +127,23 @@ Relevance (General): {material_data.get('relevance_score')}
 
     try:
         data = resp.json()
-        
+
         # Parse OpenAI-format tool call
         message = data.get("choices", [])[0].get("message", {})
         tool_calls = message.get("tool_calls", [])
-        
+
         if not tool_calls:
             logger.error("ai.evaluate.no_tool_calls", message=message)
             return None
-            
+
         function_call = tool_calls[0].get("function", {})
         if function_call.get("name") != "evaluate_material":
             logger.error("ai.evaluate.wrong_tool", tool_name=function_call.get("name"))
             return None
-            
+
         args_str = function_call.get("arguments", "{}")
         args = json.loads(args_str)
-        
+
         return args
     except Exception as e:
         logger.error("ai.evaluate.parse_error", error=str(e), text=resp.text)

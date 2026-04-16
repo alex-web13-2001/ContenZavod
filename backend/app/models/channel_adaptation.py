@@ -20,8 +20,8 @@ class ChannelAdaptation(Base, TenantMixin, TimestampMixin):
     __tablename__ = "channel_adaptations"
     __table_args__ = (
         UniqueConstraint(
-            "material_id", "channel_id", "language",
-            name="uq_material_channel_lang",
+            "material_id", "channel_id", "language", "content_format",
+            name="uq_material_channel_lang_fmt",
         ),
     )
 
@@ -44,6 +44,9 @@ class ChannelAdaptation(Base, TenantMixin, TimestampMixin):
     language: Mapped[str] = mapped_column(
         String(10), nullable=False
     )  # ru, en, el, etc.
+    content_format: Mapped[str] = mapped_column(
+        String(30), server_default="short_post", nullable=False
+    )  # short_post, longread, video_script, digest
 
     # AI-generated content
     headline: Mapped[str] = mapped_column(Text, server_default="", nullable=False)

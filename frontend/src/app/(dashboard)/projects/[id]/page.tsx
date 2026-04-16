@@ -47,23 +47,41 @@ interface Channel {
 
 interface Material {
   id: string;
-  title: string;
-  original_url: string;
-  status: string;
-  word_count: number | null;
+  material_id: string;
+  material_title: string | null;
+  material_url: string | null;
+  material_status: string | null;
+  relevance_score: number;
+  hype_score: number;
+  is_recommended: boolean;
+  explanation: string;
   created_at: string;
-  category: string | null;
-  tags: string[];
-  summary_ru: string | null;
-  relevance_score: number | null;
-  sentiment: string | null;
-  is_breaking: boolean;
-
-  // Project-level scores
+  // From old model (keep for backwards compat)
+  title?: string;
+  original_url?: string;
+  category?: string | null;
+  tags?: string[];
+  summary_ru?: string | null;
+  is_breaking?: boolean;
   project_relevance_score?: number | null;
   project_hype_score?: number | null;
-  is_recommended?: boolean;
   project_explanation?: string | null;
+}
+
+interface Adaptation {
+  id: string;
+  material_id: string;
+  channel_id: string;
+  language: string;
+  content_format: string;
+  headline: string;
+  body: string;
+  priority: string;
+  status: string;
+  created_at: string;
+  material_title: string | null;
+  channel_name: string | null;
+  channel_type: string | null;
 }
 
 const platformConfig: Record<string, { icon: typeof Send; label: string; color: string }> = {
@@ -144,6 +162,8 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [adaptations, setAdaptations] = useState<Record<string, Adaptation[]>>({});
+  const [loadingAdaptations, setLoadingAdaptations] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"recommendations" | "channels" | "settings">(
     "recommendations"
@@ -286,17 +306,57 @@ export default function ProjectDetailPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      params.set("project_id", projectId);
       params.set("per_page", "50");
-      if (onlyRecommended) params.set("recommended", "true");
+      if (onlyRecommended) params.set("recommended_only", "true");
+      else params.set("recommended_only", "false");
       const data = await api.get<{ items: Material[]; total: number }>(
-        `/materials?${params}`
+        `/projects/${projectId}/recommendations?${params}`
       );
-      setMaterials(data.items);
+      // Map fields
+      const mapped = data.items.map((m) => ({
+        ...m,
+        title: m.material_title || "Untitled",
+        original_url: m.material_url || "",
+        project_relevance_score: m.relevance_score,
+        project_hype_score: m.hype_score,
+        project_explanation: m.explanation,
+      }));
+      setMaterials(mapped);
     } finally {
       setLoading(false);
     }
   }, [projectId, onlyRecommended]);
+
+  const fetchAdaptations = useCallback(async (materialId: string) => {
+    setLoadingAdaptations((prev) => ({ ...prev, [materialId]: true }));
+    try {
+      const data = await api.get<{ items: Adaptation[] }>(
+        `/adaptations?project_id=${projectId}&per_page=100`
+      );
+      // Group by material_id
+      const filtered = data.items.filter((a) => a.material_id === materialId);
+      setAdaptations((prev) => ({ ...prev, [materialId]: filtered }));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingAdaptations((prev) => ({ ...prev, [materialId]: false }));
+    }
+  }, [projectId]);
+
+  const handleAdaptationAction = async (adaptationId: string, action: "approved" | "rejected") => {
+    try {
+      await api.patch(`/adaptations/${adaptationId}`, { status: action });
+      // Refresh adaptations for the relevant material
+      for (const [matId, adps] of Object.entries(adaptations)) {
+        if (adps.some((a) => a.id === adaptationId)) {
+          fetchAdaptations(matId);
+          break;
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   useEffect(() => {
     fetchProject();
@@ -769,60 +829,178 @@ export default function ProjectDetailPage() {
                             </div>
                           )}
 
-                          {/* Channel adaptations placeholder */}
-                          {channels.length > 0 && m.is_recommended && (
+                          {/* Channel adaptations */}
+                          {m.is_recommended && (
                             <div
                               style={{
-                                padding: "10px",
+                                padding: "12px",
                                 borderRadius: "var(--cz-radius-md)",
                                 backgroundColor: `hsl(var(--cz-bg-surface))`,
                                 border: `1px solid hsl(var(--cz-border-subtle))`,
                               }}
                             >
-                              <div
-                                style={{
-                                  fontSize: "12px",
-                                  fontWeight: 600,
-                                  color: `hsl(var(--cz-text-secondary))`,
-                                  marginBottom: "8px",
-                                }}
-                              >
-                                Каналы публикации:
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+                                <div style={{ fontSize: "13px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))` }}>
+                                  📝 Адаптации для каналов
+                                </div>
+                                {!adaptations[m.material_id || m.id] && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); fetchAdaptations(m.material_id || m.id); }}
+                                    disabled={loadingAdaptations[m.material_id || m.id]}
+                                    style={{
+                                      padding: "4px 12px",
+                                      fontSize: "11px",
+                                      fontWeight: 600,
+                                      borderRadius: "6px",
+                                      border: `1px solid hsl(var(--cz-accent) / 0.3)`,
+                                      backgroundColor: `hsl(var(--cz-accent) / 0.1)`,
+                                      color: `hsl(var(--cz-accent))`,
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    {loadingAdaptations[m.material_id || m.id] ? "Загрузка..." : "Показать"}
+                                  </button>
+                                )}
                               </div>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  flexWrap: "wrap",
-                                  gap: "6px",
-                                }}
-                              >
-                                {channels.map((ch) => {
-                                  const cfg = platformConfig[ch.channel_type];
-                                  const Icon = cfg?.icon || Send;
-                                  return ch.languages.map((lang) => (
-                                    <span
-                                      key={`${ch.id}-${lang}`}
-                                      style={{
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        gap: "4px",
-                                        padding: "4px 8px",
-                                        fontSize: "11px",
-                                        fontWeight: 500,
-                                        borderRadius: "6px",
-                                        backgroundColor: `hsl(var(--cz-bg-hover))`,
+
+                              {adaptations[m.material_id || m.id] ? (
+                                adaptations[m.material_id || m.id].length === 0 ? (
+                                  <div style={{ fontSize: "12px", color: `hsl(var(--cz-text-muted))`, padding: "8px 0" }}>
+                                    Адаптации ещё не созданы — AI-генерация в процессе ⏳
+                                  </div>
+                                ) : (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                    {adaptations[m.material_id || m.id].map((ad) => {
+                                      const chCfg = platformConfig[ad.channel_type || ""];
+                                      const statusColors: Record<string, string> = {
+                                        draft: "var(--cz-warning)",
+                                        approved: "var(--cz-success)",
+                                        rejected: "var(--cz-error)",
+                                        published: "var(--cz-info)",
+                                      };
+                                      const statusLabels: Record<string, string> = {
+                                        draft: "Черновик",
+                                        approved: "Одобрен",
+                                        rejected: "Отклонён",
+                                        published: "Опубликован",
+                                      };
+                                      return (
+                                        <div
+                                          key={ad.id}
+                                          style={{
+                                            padding: "10px",
+                                            borderRadius: "8px",
+                                            backgroundColor: `hsl(var(--cz-bg-hover))`,
+                                            border: `1px solid hsl(var(--cz-border))`,
+                                          }}
+                                        >
+                                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                              <span style={{ fontSize: "12px", fontWeight: 600, color: chCfg?.color || `hsl(var(--cz-text-primary))` }}>
+                                                {ad.channel_name || "Канал"}
+                                              </span>
+                                              <span style={{ fontSize: "10px", color: `hsl(var(--cz-text-muted))` }}>·</span>
+                                              <span style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))` }}>
+                                                {formatLabels[ad.content_format] || ad.content_format}
+                                              </span>
+                                              <span style={{ fontSize: "10px", color: `hsl(var(--cz-text-muted))` }}>·</span>
+                                              <span style={{ fontSize: "11px", fontWeight: 500, color: `hsl(var(--cz-text-secondary))` }}>
+                                                {ad.language.toUpperCase()}
+                                              </span>
+                                            </div>
+                                            <span style={{
+                                              padding: "2px 8px",
+                                              fontSize: "10px",
+                                              fontWeight: 700,
+                                              borderRadius: "4px",
+                                              backgroundColor: `hsl(${statusColors[ad.status] || "var(--cz-text-muted)"} / 0.15)`,
+                                              color: `hsl(${statusColors[ad.status] || "var(--cz-text-muted)"})`,
+                                              textTransform: "uppercase",
+                                            }}>
+                                              {statusLabels[ad.status] || ad.status}
+                                            </span>
+                                          </div>
+
+                                          {ad.headline && (
+                                            <div style={{ fontSize: "13px", fontWeight: 600, color: `hsl(var(--cz-text-primary))`, marginBottom: "4px" }}>
+                                              {ad.headline}
+                                            </div>
+                                          )}
+                                          <div style={{
+                                            fontSize: "12px",
+                                            lineHeight: "1.6",
+                                            color: `hsl(var(--cz-text-secondary))`,
+                                            whiteSpace: "pre-wrap",
+                                            maxHeight: "120px",
+                                            overflow: "auto",
+                                          }}>
+                                            {ad.body}
+                                          </div>
+
+                                          {ad.status === "draft" && (
+                                            <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                                              <button
+                                                onClick={(e) => { e.stopPropagation(); handleAdaptationAction(ad.id, "approved"); }}
+                                                style={{
+                                                  padding: "4px 14px",
+                                                  fontSize: "11px",
+                                                  fontWeight: 600,
+                                                  borderRadius: "6px",
+                                                  border: "none",
+                                                  backgroundColor: `hsl(var(--cz-success))`,
+                                                  color: "white",
+                                                  cursor: "pointer",
+                                                  display: "flex",
+                                                  alignItems: "center",
+                                                  gap: "4px",
+                                                }}
+                                              >
+                                                <Check size={12} /> Одобрить
+                                              </button>
+                                              <button
+                                                onClick={(e) => { e.stopPropagation(); handleAdaptationAction(ad.id, "rejected"); }}
+                                                style={{
+                                                  padding: "4px 14px",
+                                                  fontSize: "11px",
+                                                  fontWeight: 600,
+                                                  borderRadius: "6px",
+                                                  border: `1px solid hsl(var(--cz-error) / 0.3)`,
+                                                  backgroundColor: "transparent",
+                                                  color: `hsl(var(--cz-error))`,
+                                                  cursor: "pointer",
+                                                  display: "flex",
+                                                  alignItems: "center",
+                                                  gap: "4px",
+                                                }}
+                                              >
+                                                <X size={12} /> Отклонить
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )
+                              ) : (
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                                  {channels.map((ch) => {
+                                    const cfg = platformConfig[ch.channel_type];
+                                    const Icon = cfg?.icon || Send;
+                                    return ch.languages.map((lang) => (
+                                      <span key={`${ch.id}-${lang}`} style={{
+                                        display: "inline-flex", alignItems: "center", gap: "4px",
+                                        padding: "4px 8px", fontSize: "11px", fontWeight: 500,
+                                        borderRadius: "6px", backgroundColor: `hsl(var(--cz-bg-hover))`,
                                         color: `hsl(var(--cz-text-secondary))`,
-                                      }}
-                                    >
-                                      <Icon size={12} />
-                                      {ch.name} · {lang.toUpperCase()}
-                                      <span style={{ color: `hsl(var(--cz-text-muted))` }}>
-                                        ⏳
+                                      }}>
+                                        <Icon size={12} />
+                                        {ch.name} · {lang.toUpperCase()}
                                       </span>
-                                    </span>
-                                  ));
-                                })}
-                              </div>
+                                    ));
+                                  })}
+                                </div>
+                              )}
                             </div>
                           )}
 
