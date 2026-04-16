@@ -10,7 +10,7 @@ class ChannelCreate(BaseModel):
     project_id: UUID | None = None
     name: str = Field(..., min_length=1, max_length=255)
     channel_type: str = Field(..., pattern=r"^(telegram|youtube|website)$")
-    content_format: str = Field(default="short_post", pattern=r"^(short_post|longread|video_script|digest)$")
+    content_formats: list[str] = Field(default_factory=lambda: ["short_post"])
     tone_of_voice: str = ""
     languages: list[str] = Field(default_factory=lambda: ["ru"])
     config: dict = Field(default_factory=dict)
@@ -23,7 +23,7 @@ class ChannelUpdate(BaseModel):
     project_id: UUID | None = None
     name: str | None = None
     channel_type: str | None = None
-    content_format: str | None = None
+    content_formats: list[str] | None = None
     tone_of_voice: str | None = None
     languages: list[str] | None = None
     config: dict | None = None
@@ -38,7 +38,7 @@ class ChannelResponse(BaseModel):
     project_id: UUID | None = None
     name: str
     channel_type: str
-    content_format: str
+    content_formats: list[str]
     tone_of_voice: str
     languages: list[str]
     config: dict

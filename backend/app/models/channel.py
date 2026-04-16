@@ -40,10 +40,10 @@ class Channel(Base, TenantMixin, TimestampMixin):
         String(50), nullable=False
     )  # telegram | youtube | website
 
-    # Content format: how articles are structured for this channel
-    content_format: Mapped[str] = mapped_column(
-        String(50), server_default="short_post", nullable=False
-    )  # short_post | longread | video_script | digest
+    # Content formats: which article types this channel publishes (JSON array)
+    content_formats: Mapped[list] = mapped_column(
+        JSONB, server_default='["short_post"]', nullable=False
+    )  # ["short_post", "longread", "video_script", "digest"]
 
     # Tone of voice: writing style instructions for AI
     tone_of_voice: Mapped[str] = mapped_column(

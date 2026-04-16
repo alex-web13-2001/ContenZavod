@@ -35,7 +35,7 @@ interface Channel {
   id: string;
   name: string;
   channel_type: string;
-  content_format: string;
+  content_formats: string[];
   tone_of_voice: string;
   languages: string[];
   is_active: boolean;
@@ -146,7 +146,7 @@ export default function ProjectDetailPage() {
   const [channelForm, setChannelForm] = useState({
     name: "",
     channel_type: "telegram",
-    content_format: "short_post",
+    content_formats: ["short_post"],
     tone_of_voice: "",
     languages: ["ru"],
   });
@@ -160,7 +160,7 @@ export default function ProjectDetailPage() {
         project_id: projectId,
       });
       setShowChannelForm(false);
-      setChannelForm({ name: "", channel_type: "telegram", content_format: "short_post", tone_of_voice: "", languages: ["ru"] });
+      setChannelForm({ name: "", channel_type: "telegram", content_formats: ["short_post"], tone_of_voice: "", languages: ["ru"] });
       fetchChannels();
     } catch (e) {
       console.error(e);
@@ -926,12 +926,17 @@ export default function ProjectDetailPage() {
                       { value: "video_script", label: "🎬 Видео-скрипт" },
                       { value: "digest", label: "📋 Дайджест" },
                     ].map((opt) => {
-                      const isActive = channelForm.content_format === opt.value;
+                      const isActive = channelForm.content_formats.includes(opt.value);
                       return (
                         <button
                           key={opt.value}
                           type="button"
-                          onClick={() => setChannelForm({ ...channelForm, content_format: opt.value })}
+                          onClick={() => {
+                            const formats = isActive
+                              ? channelForm.content_formats.filter((f) => f !== opt.value)
+                              : [...channelForm.content_formats, opt.value];
+                            if (formats.length > 0) setChannelForm({ ...channelForm, content_formats: formats });
+                          }}
                           style={{
                             padding: "8px 16px",
                             fontSize: "13px",
@@ -1172,7 +1177,7 @@ export default function ProjectDetailPage() {
                           >
                             <span>{cfg?.label}</span>
                             <span>·</span>
-                            <span>{ch.content_format}</span>
+                            <span>{ch.content_formats.join(", ")}</span>
                             <span>·</span>
                             <span>
                               {ch.languages.map((l) => l.toUpperCase()).join(", ")}
