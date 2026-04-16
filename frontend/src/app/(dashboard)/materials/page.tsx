@@ -19,6 +19,15 @@ interface Material {
   sentiment: string | null;
   is_breaking: boolean;
   classified_by: string | null;
+  channel_relevance_score?: number | null;
+  channel_hype_score?: number | null;
+  is_recommended_for_channel?: boolean | null;
+  channel_explanation?: string | null;
+}
+
+interface Channel {
+  id: string;
+  name: string;
 }
 
 const statusConfig: Record<string, { label: string; variant: "default" | "success" | "warning" | "error" | "info" }> = {
@@ -95,18 +104,30 @@ function TagChip({ tag }: { tag: string }) {
 
 export default function MaterialsPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [channels, setChannels] = useState<{ value: string; label: string }[]>([
+    { value: "all", label: "Все каналы (Без оценки)" }
+  ]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [channelFilter, setChannelFilter] = useState("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [classifyLoading, setClassifyLoading] = useState(false);
 
-  const fetchMaterials = useCallback(async (status?: string) => {
+  useEffect(() => {
+    api.get<{ items: Channel[] }>("/channels").then((data) => {
+      const opts = data.items.map((c) => ({ value: c.id, label: c.name }));
+      setChannels([{ value: "all", label: "Все каналы (Без оценки)" }, ...opts]);
+    }).catch(console.error);
+  }, []);
+
+  const fetchMaterials = useCallback(async (status?: string, channelId?: string) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (status && status !== "all") params.set("status", status);
-      params.set("limit", "50");
+      if (channelId && channelId !== "all") params.set("channel_id", channelId);
+      params.set("per_page", "50");
       const data = await api.get<{ items: Material[]; total: number }>(`/materials?${params}`);
       setMaterials(data.items);
       setTotal(data.total);
@@ -115,16 +136,16 @@ export default function MaterialsPage() {
     }
   }, []);
 
-  useEffect(() => { fetchMaterials(statusFilter); }, [statusFilter, fetchMaterials]);
+  useEffect(() => { fetchMaterials(statusFilter, channelFilter); }, [statusFilter, channelFilter, fetchMaterials]);
 
   const handleClassifyAll = async () => {
     setClassifyLoading(true);
     try {
       await api.post("/materials/classify-all", {});
       // Poll for results
-      setTimeout(() => fetchMaterials(statusFilter), 5000);
-      setTimeout(() => fetchMaterials(statusFilter), 15000);
-      setTimeout(() => fetchMaterials(statusFilter), 30000);
+      setTimeout(() => fetchMaterials(statusFilter, channelFilter), 5000);
+      setTimeout(() => fetchMaterials(statusFilter, channelFilter), 15000);
+      setTimeout(() => fetchMaterials(statusFilter, channelFilter), 30000);
     } finally {
       setTimeout(() => setClassifyLoading(false), 3000);
     }
@@ -162,7 +183,10 @@ export default function MaterialsPage() {
               {classifyLoading ? "Классификация..." : `Классифицировать (${newCount})`}
             </button>
           )}
-          <div style={{ width: "200px" }}>
+          <div style={{ width: "220px" }}>
+            <CzSelect value={channelFilter} onChange={setChannelFilter} options={channels} />
+          </div>
+          <div style={{ width: "160px" }}>
             <CzSelect value={statusFilter} onChange={setStatusFilter} options={statusOptions} />
           </div>
         </div>
@@ -262,6 +286,16 @@ export default function MaterialsPage() {
                             <Zap size={10} />BREAKING
                           </span>
                         )}
+                        {m.is_recommended_for_channel && (
+                          <span style={{
+                            display: "inline-flex", alignItems: "center", gap: "3px",
+                            padding: "1px 6px", fontSize: "10px", fontWeight: 700,
+                            borderRadius: "4px", backgroundColor: `hsl(var(--cz-success))`, color: "white",
+                            textTransform: "uppercase", letterSpacing: "0.05em",
+                          }}>
+                            <Sparkles size={10} />РЕКОМЕНДОВАНО
+                          </span>
+                        )}
                         <span style={{
                           fontSize: "14px", fontWeight: 500,
                           color: `hsl(var(--cz-text-primary))`,
@@ -316,7 +350,18 @@ export default function MaterialsPage() {
                       </div>
 
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        {m.relevance_score != null && <RelevanceBar score={m.relevance_score} />}
+                        {m.channel_hype_score != null && (
+                          <div title="Hype Score">
+                            <span style={{ fontSize: "11px", color: "var(--cz-text-muted)" }}>Hype:</span><RelevanceBar score={m.channel_hype_score * 10} />
+                          </div>
+                        )}
+                        {m.channel_relevance_score != null ? (
+                           <div title="Channel Relevance">
+                            <span style={{ fontSize: "11px", color: "var(--cz-text-muted)" }}>Релев:</span><RelevanceBar score={m.channel_relevance_score * 10} />
+                           </div>
+                        ) : m.relevance_score != null ? (
+                          <RelevanceBar score={m.relevance_score} />
+                        ) : null}
                         {sent && (
                           <span style={{
                             fontSize: "11px", fontWeight: 500,
@@ -346,6 +391,23 @@ export default function MaterialsPage() {
                       borderTop: `1px solid hsl(var(--cz-border))`,
                       display: "flex", flexDirection: "column", gap: "8px",
                     }}>
+                      {m.channel_explanation && (
+                         <div style={{
+                          padding: "10px",
+                          borderRadius: "var(--cz-radius-md)",
+                          backgroundColor: m.is_recommended_for_channel ? `hsl(var(--cz-success) / 0.1)` : `hsl(var(--cz-warning) / 0.1)`,
+                          border: `1px solid ${m.is_recommended_for_channel ? `hsl(var(--cz-success) / 0.2)` : `hsl(var(--cz-warning) / 0.2)`}`,
+                          fontSize: "13px",
+                          lineHeight: "1.5",
+                          color: `hsl(var(--cz-text-secondary))`
+                         }}>
+                           <strong style={{ display: "block", marginBottom: "4px", color: m.is_recommended_for_channel ? `hsl(var(--cz-success))` : `hsl(var(--cz-warning))` }}>
+                             Оценка редактора (Канал):
+                           </strong>
+                           {m.channel_explanation}
+                         </div>
+                      )}
+                      
                       <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
                         <a
                           href={m.original_url}

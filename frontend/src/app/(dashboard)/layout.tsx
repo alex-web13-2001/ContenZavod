@@ -9,6 +9,7 @@ import {
   Radio,
   FileText,
   Send,
+  FolderOpen,
   LogOut,
   Loader2,
   ChevronLeft,
@@ -17,6 +18,7 @@ import {
 
 const navItems = [
   { href: "/", label: "Дашборд", icon: LayoutDashboard },
+  { href: "/projects", label: "Проекты", icon: FolderOpen },
   { href: "/sources", label: "Источники", icon: Radio },
   { href: "/materials", label: "Материалы", icon: FileText },
   { href: "/channels", label: "Каналы", icon: Send },

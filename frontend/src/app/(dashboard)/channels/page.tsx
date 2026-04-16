@@ -11,6 +11,8 @@ interface Channel {
   name: string;
   channel_type: string;
   config: Record<string, unknown>;
+  editorial_guidelines?: string;
+  target_audience?: string;
   is_active: boolean;
   created_at: string;
 }
@@ -28,7 +30,12 @@ export default function ChannelsPage() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", channel_type: "telegram" });
+  const [form, setForm] = useState({ 
+    name: "", 
+    channel_type: "telegram",
+    editorial_guidelines: "",
+    target_audience: ""
+  });
 
   const fetchChannels = async () => {
     try {
@@ -53,7 +60,7 @@ export default function ChannelsPage() {
       }
       setDialogOpen(false);
       setEditingId(null);
-      setForm({ name: "", channel_type: "telegram" });
+      setForm({ name: "", channel_type: "telegram", editorial_guidelines: "", target_audience: "" });
       fetchChannels();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Ошибка");
@@ -73,13 +80,18 @@ export default function ChannelsPage() {
 
   const openEdit = (ch: Channel) => {
     setEditingId(ch.id);
-    setForm({ name: ch.name, channel_type: ch.channel_type });
+    setForm({ 
+      name: ch.name, 
+      channel_type: ch.channel_type,
+      editorial_guidelines: ch.editorial_guidelines || "",
+      target_audience: ch.target_audience || ""
+    });
     setDialogOpen(true);
   };
 
   const openNew = () => {
     setEditingId(null);
-    setForm({ name: "", channel_type: "telegram" });
+    setForm({ name: "", channel_type: "telegram", editorial_guidelines: "", target_audience: "" });
     setDialogOpen(true);
   };
 
@@ -97,6 +109,27 @@ export default function ChannelsPage() {
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <CzInput label="Название" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required placeholder="Название канала" />
           <CzSelect label="Тип канала" value={form.channel_type} onChange={(v) => setForm({ ...form, channel_type: v })} options={typeOptions} />
+          <CzInput 
+            label="Целевая аудитория (AI контекст)" 
+            value={form.target_audience} 
+            onChange={(e) => setForm({ ...form, target_audience: e.target.value })} 
+            placeholder="Опишите, кто читает этот канал (напр. Tech entrepreneurs in Cyprus)"
+          />
+          <div>
+            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "hsl(var(--cz-text-primary))", marginBottom: "6px" }}>
+              Редакционная политика (AI инструкции)
+            </label>
+            <textarea 
+              value={form.editorial_guidelines}
+              onChange={(e) => setForm({ ...form, editorial_guidelines: e.target.value })}
+              placeholder="Инструкции для ИИ редактора: что публиковать, о чем умалчивать, стиль..."
+              style={{
+                width: "100%", padding: "10px", fontSize: "14px", borderRadius: "var(--cz-radius-md)",
+                border: "1px solid hsl(var(--cz-border))", minHeight: "80px", 
+                backgroundColor: "hsl(var(--cz-bg-primary))", color: "hsl(var(--cz-text-primary))"
+              }}
+            />
+          </div>
           <CzButton type="submit" fullWidth size="lg">{editingId ? "Сохранить" : "Создать"}</CzButton>
         </form>
       </CzDialog>
