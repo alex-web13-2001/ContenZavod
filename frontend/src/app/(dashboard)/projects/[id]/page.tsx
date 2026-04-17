@@ -155,6 +155,26 @@ function ScoreBar({ score, maxScore = 10 }: { score: number; maxScore?: number }
   );
 }
 
+/** Lightweight markdown→HTML for AI-generated adaptation text */
+function renderMarkdownToHtml(text: string): string {
+  if (!text) return "";
+  let html = text
+    // Escape HTML
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    // Bold: **text** or __text__
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/__(.+?)__/g, "<strong>$1</strong>")
+    // Italic: *text* or _text_ (but not inside words)
+    .replace(/(?<![\w*])\*([^*]+?)\*(?![\w*])/g, "<em>$1</em>")
+    // Headers: ### text → bold block
+    .replace(/^#{1,3}\s+(.+)$/gm, "<strong style=\"display:block;margin:8px 0 4px\">$1</strong>")
+    // Line breaks
+    .replace(/\n/g, "<br/>");
+  return html;
+}
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const projectId = params.id as string;
@@ -800,7 +820,7 @@ export default function ProjectDetailPage() {
                                   marginBottom: "8px",
                                   lineHeight: "1.4",
                                 }}>
-                                  {ad.headline}
+                                  <span dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(ad.headline) }} />
                                 </div>
                               )}
 
@@ -811,14 +831,13 @@ export default function ProjectDetailPage() {
                                   fontSize: "15px",
                                   lineHeight: "1.7",
                                   color: `hsl(var(--cz-text-secondary))`,
-                                  whiteSpace: "pre-wrap",
                                   maxHeight: expandedId === ad.id ? "none" : "160px",
                                   overflow: "hidden",
                                   cursor: "pointer",
                                   position: "relative",
                                 }}
                               >
-                                {ad.body}
+                                <span dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(ad.body) }} />
                                 {expandedId !== ad.id && ad.body && ad.body.length > 300 && (
                                   <div style={{
                                     position: "absolute",
