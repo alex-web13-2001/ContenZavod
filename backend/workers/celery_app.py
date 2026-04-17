@@ -60,6 +60,18 @@ celery_app.conf.beat_schedule = {
         "task": "workers.scrape_tasks.scrape_all_active_sources",
         "schedule": crontab(minute=0, hour="*/2"),
     },
+    # Classify new materials every 30 minutes
+    "classify-new-materials": {
+        "task": "workers.ai_tasks.classify_new_materials",
+        "schedule": crontab(minute="*/30"),
+        "options": {"queue": "ai_queue"},
+    },
+    # Evaluate classified materials for projects every 15 minutes
+    "evaluate-classified-materials": {
+        "task": "workers.ai_tasks.evaluate_classified_materials",
+        "schedule": crontab(minute="*/15"),
+        "options": {"queue": "ai_queue"},
+    },
 }
 
 # Explicitly register task modules

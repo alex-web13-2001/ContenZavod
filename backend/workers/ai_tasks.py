@@ -132,6 +132,36 @@ def classify_new_materials(tenant_id: str | None = None):
     return {"queued": queued}
 
 
+@shared_task(name="workers.ai_tasks.evaluate_classified_materials")
+def evaluate_classified_materials(tenant_id: str | None = None):
+    """Find classified materials without project scores and queue evaluation."""
+    log = logger.bind(tenant_id=tenant_id)
+    log.info("ai.evaluate_batch.start")
+
+    from app.models.project_score import MaterialProjectScore
+
+    with get_sync_session() as session:
+        # Find classified materials that have NO project scores yet
+        scored_ids = select(MaterialProjectScore.material_id).distinct()
+        query = select(RawMaterial.id, RawMaterial.tenant_id).where(
+            RawMaterial.status == "classified",
+            ~RawMaterial.id.in_(scored_ids),
+        )
+        if tenant_id:
+            query = query.where(RawMaterial.tenant_id == uuid.UUID(tenant_id))
+
+        query = query.limit(30)  # Process in batches of 30
+        materials = session.execute(query).all()
+
+    queued = 0
+    for mat_id, t_id in materials:
+        evaluate_material_for_projects.delay(str(mat_id), str(t_id))
+        queued += 1
+
+    log.info("ai.evaluate_batch.done", queued=queued)
+    return {"queued": queued}
+
+
 @shared_task(bind=True, name="workers.ai_tasks.evaluate_material_for_projects", max_retries=3)
 def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
     """Evaluate a classified material against all active projects for a tenant.
