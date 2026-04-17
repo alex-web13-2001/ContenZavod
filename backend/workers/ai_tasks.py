@@ -320,9 +320,19 @@ def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_
         }
 
         adapted = 0
+        # Default primary formats per platform
+        _platform_defaults = {
+            "telegram": "short_post",
+            "website": "longread",
+            "youtube": "video_script",
+        }
         for channel in channels:
-            # Only generate the PRIMARY format (first in the list)
-            primary_format = channel.content_formats[0] if channel.content_formats else "short_post"
+            # Pick the best primary format for this platform
+            default = _platform_defaults.get(channel.channel_type, "short_post")
+            if default in (channel.content_formats or []):
+                primary_format = default
+            else:
+                primary_format = channel.content_formats[0] if channel.content_formats else "short_post"
             for language in channel.languages:
                 # Check if adaptation already exists (idempotency)
                 existing = session.execute(
