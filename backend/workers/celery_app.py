@@ -78,4 +78,5 @@ celery_app.conf.beat_schedule = {
 celery_app.conf.include = [
     "workers.scrape_tasks",
     "workers.ai_tasks",
+    "workers.publish_tasks",
 ]

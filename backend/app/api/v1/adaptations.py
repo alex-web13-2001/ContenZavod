@@ -134,17 +134,57 @@ async def update_adaptation(
     _user: str = Depends(get_current_user_id),
     tenant_id: str = Depends(get_tenant_id),
 ):
-    """Update an adaptation (approve, reject, or edit content)."""
+    """Update an adaptation (approve, reject, or edit content).
+
+    When status changes to 'approved':
+    - Creates a PublishJob record
+    - Queues a Celery task to publish to the channel
+    """
+    from app.models.publish_job import PublishJob
+
     adaptation = await db.get(ChannelAdaptation, adaptation_id)
     if not adaptation or str(adaptation.tenant_id) != tenant_id:
         raise HTTPException(status_code=404, detail="Adaptation not found")
 
+    old_status = adaptation.status
     update_data = data.model_dump(exclude_none=True)
     for key, value in update_data.items():
         setattr(adaptation, key, value)
 
+    publish_job_id = None
+
+    # If status changed to "approved" → trigger publish
+    if data.status == "approved" and old_status != "approved":
+        channel = await db.get(Channel, adaptation.channel_id)
+        config = (channel.config or {}) if channel else {}
+
+        if config.get("bot_token") and config.get("chat_id"):
+            # Create PublishJob
+            idempotency_key = f"{adaptation.id}:{adaptation.channel_id}:{adaptation.content_format}"
+
+            # Check for existing job (idempotency)
+            existing_job = await db.execute(
+                select(PublishJob).where(PublishJob.idempotency_key == idempotency_key)
+            )
+            if not existing_job.scalar_one_or_none():
+                job = PublishJob(
+                    content_id=adaptation.id,
+                    channel_id=adaptation.channel_id,
+                    tenant_id=uuid.UUID(tenant_id),
+                    status="queued",
+                    idempotency_key=idempotency_key,
+                )
+                db.add(job)
+                await db.flush()
+                publish_job_id = str(job.id)
+
     await db.commit()
     await db.refresh(adaptation)
+
+    # Queue Celery task AFTER commit (so PublishJob exists in DB)
+    if publish_job_id:
+        from workers.publish_tasks import publish_to_telegram
+        publish_to_telegram.delay(publish_job_id)
 
     return {
         "id": str(adaptation.id),
@@ -152,6 +192,7 @@ async def update_adaptation(
         "headline": adaptation.headline,
         "body": adaptation.body,
         "content_format": adaptation.content_format,
+        "publish_job_id": publish_job_id,
     }
 
 

@@ -24,7 +24,7 @@ class PublishJob(Base, TenantMixin, TimestampMixin):
     )
     content_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("adapted_contents.id", ondelete="CASCADE"),
+        ForeignKey("channel_adaptations.id", ondelete="CASCADE"),
         nullable=False,
     )
     channel_id: Mapped[uuid.UUID] = mapped_column(

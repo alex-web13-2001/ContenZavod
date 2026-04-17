@@ -43,6 +43,7 @@ interface Channel {
   tone_of_voice: string;
   languages: string[];
   is_active: boolean;
+  config?: { bot_token?: string; chat_id?: string };
 }
 
 interface Material {
@@ -207,18 +208,22 @@ export default function ProjectDetailPage() {
     content_formats: ["short_post"],
     tone_of_voice: "",
     languages: ["ru"],
+    bot_token: "",
+    chat_id: "",
   });
 
   const handleCreateChannel = async () => {
     if (!channelForm.name.trim()) return;
     setChannelSaving(true);
     try {
+      const { bot_token, chat_id, ...rest } = channelForm;
       await api.post("/channels", {
-        ...channelForm,
+        ...rest,
         project_id: projectId,
+        config: { bot_token, chat_id },
       });
       setShowChannelForm(false);
-      setChannelForm({ name: "", channel_type: "telegram", content_formats: ["short_post"], tone_of_voice: "", languages: ["ru"] });
+      setChannelForm({ name: "", channel_type: "telegram", content_formats: ["short_post"], tone_of_voice: "", languages: ["ru"], bot_token: "", chat_id: "" });
       fetchChannels();
     } catch (e) {
       console.error(e);
@@ -236,6 +241,8 @@ export default function ProjectDetailPage() {
     tone_of_voice: "",
     languages: ["ru"],
     is_active: true,
+    bot_token: "",
+    chat_id: "",
   });
 
   const startEditChannel = (ch: Channel) => {
@@ -247,6 +254,8 @@ export default function ProjectDetailPage() {
       tone_of_voice: ch.tone_of_voice,
       languages: ch.languages,
       is_active: ch.is_active,
+      bot_token: (ch as any).config?.bot_token || "",
+      chat_id: (ch as any).config?.chat_id || "",
     });
     setShowChannelForm(false);
   };
@@ -255,7 +264,11 @@ export default function ProjectDetailPage() {
     if (!editChannelId || !editChannelForm.name.trim()) return;
     setChannelSaving(true);
     try {
-      await api.patch(`/channels/${editChannelId}`, editChannelForm);
+      const { bot_token, chat_id, ...rest } = editChannelForm;
+      await api.patch(`/channels/${editChannelId}`, {
+        ...rest,
+        config: { bot_token, chat_id },
+      });
       setEditChannelId(null);
       fetchChannels();
     } catch (e) {
@@ -1035,6 +1048,48 @@ export default function ProjectDetailPage() {
                                   </button>
                                 </div>
                               )}
+
+                              {/* Published indicator */}
+                              {ad.status === "published" && (
+                                <div
+                                  style={{
+                                    marginTop: "14px",
+                                    padding: "10px 16px",
+                                    borderRadius: "8px",
+                                    backgroundColor: `hsl(var(--cz-success) / 0.1)`,
+                                    border: `1px solid hsl(var(--cz-success) / 0.2)`,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "8px",
+                                    fontSize: "13px",
+                                    fontWeight: 500,
+                                    color: `hsl(var(--cz-success))`,
+                                  }}
+                                >
+                                  <Check size={16} /> Опубликовано в Telegram
+                                </div>
+                              )}
+
+                              {/* Approved but waiting for publish */}
+                              {ad.status === "approved" && (
+                                <div
+                                  style={{
+                                    marginTop: "14px",
+                                    padding: "10px 16px",
+                                    borderRadius: "8px",
+                                    backgroundColor: `hsl(var(--cz-warning) / 0.1)`,
+                                    border: `1px solid hsl(var(--cz-warning) / 0.2)`,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "8px",
+                                    fontSize: "13px",
+                                    fontWeight: 500,
+                                    color: `hsl(var(--cz-warning))`,
+                                  }}
+                                >
+                                  ⏳ Одобрено — публикация в очереди
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -1449,6 +1504,61 @@ export default function ProjectDetailPage() {
                   />
                 </div>
 
+                {/* Telegram config */}
+                {channelForm.channel_type === "telegram" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <p
+                      style={{
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        color: `hsl(var(--cz-text-secondary))`,
+                        margin: 0,
+                      }}
+                    >
+                      🤖 Настройки Telegram-бота
+                    </p>
+                    <input
+                      type="password"
+                      placeholder="Bot Token (от @BotFather)"
+                      value={channelForm.bot_token}
+                      onChange={(e) => setChannelForm({ ...channelForm, bot_token: e.target.value })}
+                      className="focus-ring"
+                      style={{
+                        width: "100%",
+                        padding: "10px 16px",
+                        fontSize: "13px",
+                        fontFamily: "var(--cz-font-mono, monospace)",
+                        color: `hsl(var(--cz-text-primary))`,
+                        backgroundColor: `hsl(var(--cz-bg-input))`,
+                        border: `1px solid hsl(var(--cz-border))`,
+                        borderRadius: "var(--cz-radius-md)",
+                        outline: "none",
+                      }}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Chat ID канала (напр. @ecocyprus_ru или -100123456789)"
+                      value={channelForm.chat_id}
+                      onChange={(e) => setChannelForm({ ...channelForm, chat_id: e.target.value })}
+                      className="focus-ring"
+                      style={{
+                        width: "100%",
+                        padding: "10px 16px",
+                        fontSize: "13px",
+                        fontFamily: "var(--cz-font-mono, monospace)",
+                        color: `hsl(var(--cz-text-primary))`,
+                        backgroundColor: `hsl(var(--cz-bg-input))`,
+                        border: `1px solid hsl(var(--cz-border))`,
+                        borderRadius: "var(--cz-radius-md)",
+                        outline: "none",
+                      }}
+                    />
+                    <p style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))`, margin: 0 }}>
+                      Бот должен быть администратором канала с правами на публикацию
+                    </p>
+                  </div>
+                )}
+
                 {/* Divider */}
                 <div style={{ height: "1px", backgroundColor: `hsl(var(--cz-border-subtle))` }} />
 
@@ -1684,6 +1794,41 @@ export default function ProjectDetailPage() {
                             }}
                           />
                         </div>
+
+                        {/* Telegram bot config */}
+                        {editChannelForm.channel_type === "telegram" && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <label style={{ fontSize: "12px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))`, textTransform: "uppercase", letterSpacing: "0.05em" }}>🤖 Telegram Bot</label>
+                            <input
+                              type="password"
+                              placeholder="Bot Token"
+                              value={editChannelForm.bot_token}
+                              onChange={(e) => setEditChannelForm({ ...editChannelForm, bot_token: e.target.value })}
+                              className="focus-ring"
+                              style={{
+                                width: "100%", padding: "8px 14px", fontSize: "13px",
+                                fontFamily: "var(--cz-font-mono, monospace)",
+                                color: `hsl(var(--cz-text-primary))`, backgroundColor: `hsl(var(--cz-bg-input))`,
+                                border: `1px solid hsl(var(--cz-border))`, borderRadius: "var(--cz-radius-md)",
+                                outline: "none",
+                              }}
+                            />
+                            <input
+                              type="text"
+                              placeholder="Chat ID (@channel или -100...)"
+                              value={editChannelForm.chat_id}
+                              onChange={(e) => setEditChannelForm({ ...editChannelForm, chat_id: e.target.value })}
+                              className="focus-ring"
+                              style={{
+                                width: "100%", padding: "8px 14px", fontSize: "13px",
+                                fontFamily: "var(--cz-font-mono, monospace)",
+                                color: `hsl(var(--cz-text-primary))`, backgroundColor: `hsl(var(--cz-bg-input))`,
+                                border: `1px solid hsl(var(--cz-border))`, borderRadius: "var(--cz-radius-md)",
+                                outline: "none",
+                              }}
+                            />
+                          </div>
+                        )}
 
                         {/* Actions */}
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
