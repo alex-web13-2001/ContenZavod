@@ -24,3 +24,23 @@
 - Frontend: Next.js 16 + shadcn/ui + Tailwind v4 + Zustand
 - Страницы: Login, Dashboard, Sources, Materials, Channels
 - Sidebar layout с auth guard и toast-уведомлениями
+- Проекты: CRUD, привязка каналов к проектам
+- Рекомендации: AI-скоринг материалов для проектов (relevance + hype)
+- Адаптации: AI-генерация контента под формат канала (short_post, longread, video_script, digest)
+- On-demand генерация: API `POST /adaptations/generate` + UI-кнопки «+ ещё формат»
+- Умный выбор основного формата: short_post для Telegram, longread для Website, video_script для YouTube
+- Фильтр по рубрикам: UI-чипы с эмодзи, `GET /projects/{id}/categories`, query-параметр `category`
+- Telegram-публикация: полный пайплайн Одобрить → PublishJob → Bot API → Опубликовано
+- `TelegramClient` — HTTP-клиент для Telegram Bot API (markdown → HTML, отправка сообщений)
+- `PublishService` — сервис публикации контента с lifecycle менеджментом
+- UI настроек бота: поля Bot Token и Chat ID в формах создания/редактирования каналов
+- Статус-индикаторы: «✅ Опубликовано в Telegram» / «⏳ Одобрено — публикация в очереди»
+
+### Changed
+- `content_formats` канала Telegram: порядок изменён на `[short_post, longread, ...]` (был longread первым)
+- `PublishJob.content_id` FK: перенаправлен с `adapted_contents` на `channel_adaptations`
+- `publish_tasks.py`: вынесена бизнес-логика в `PublishService` + `TelegramClient` (было 200 строк → 55)
+
+### Fixed
+- Исправлен дефолтный формат для Telegram: теперь генерируется short_post вместо longread
+- Исправлен ORM-атрибут `metadata` → `metadata_` в запросах категорий

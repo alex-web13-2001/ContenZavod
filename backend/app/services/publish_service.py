@@ -1,0 +1,214 @@
+"""Publish service — orchestrates content publishing to channels.
+
+Manages the lifecycle of PublishJobs:
+    load → validate → format → send → update status.
+
+Can be called from Celery tasks, API endpoints, or tests.
+"""
+
+import uuid
+from datetime import datetime, timezone
+
+import structlog
+from sqlalchemy.orm import Session
+
+from app.models.channel import Channel
+from app.models.channel_adaptation import ChannelAdaptation
+from app.models.publish_job import PublishJob
+from app.services.telegram_client import TelegramClient
+
+log = structlog.get_logger()
+
+
+class PublishError(Exception):
+    """Non-retryable publish error."""
+
+
+class PublishRetryError(Exception):
+    """Retryable publish error — task should retry."""
+
+
+class PublishService:
+    """Service for publishing adapted content to channels.
+
+    Handles the full publish lifecycle: loading data, formatting,
+    sending via platform clients, and updating statuses.
+    Works with a sync SQLAlchemy session (for Celery workers).
+    """
+
+    def __init__(self, session: Session):
+        """Initialize with a database session.
+
+        Args:
+            session: Sync SQLAlchemy session.
+        """
+        self.session = session
+
+    def execute(self, publish_job_id: str) -> dict:
+        """Execute a publish job end-to-end.
+
+        Args:
+            publish_job_id: UUID of the PublishJob to execute.
+
+        Returns:
+            Dict with status, message_id, and chat_id on success.
+
+        Raises:
+            PublishError: On non-retryable failures.
+            PublishRetryError: On transient failures that should be retried.
+        """
+        job = self._load_job(publish_job_id)
+        adaptation = self._load_adaptation(job)
+        channel = self._load_channel(job)
+
+        bot_token, chat_id = self._validate_config(channel)
+        message_html = self._format_message(adaptation, bot_token)
+
+        result = self._send(bot_token, chat_id, message_html)
+
+        self._mark_published(job, adaptation, result, chat_id)
+        return result
+
+    def _load_job(self, job_id: str) -> PublishJob:
+        """Load and validate the publish job."""
+        job = self.session.get(PublishJob, uuid.UUID(job_id))
+        if not job:
+            raise PublishError(f"PublishJob {job_id} not found")
+
+        job.status = "publishing"
+        self.session.commit()
+        return job
+
+    def _load_adaptation(self, job: PublishJob) -> ChannelAdaptation:
+        """Load the adaptation linked to the job."""
+        adaptation = self.session.get(ChannelAdaptation, job.content_id)
+        if not adaptation:
+            self._fail_job(job, "Adaptation not found")
+            raise PublishError("Adaptation not found")
+        return adaptation
+
+    def _load_channel(self, job: PublishJob) -> Channel:
+        """Load the channel linked to the job."""
+        channel = self.session.get(Channel, job.channel_id)
+        if not channel:
+            self._fail_job(job, "Channel not found")
+            raise PublishError("Channel not found")
+        return channel
+
+    def _validate_config(self, channel: Channel) -> tuple[str, str]:
+        """Extract and validate bot_token and chat_id from channel config.
+
+        Args:
+            channel: Channel model instance.
+
+        Returns:
+            Tuple of (bot_token, chat_id).
+
+        Raises:
+            PublishError: If config is incomplete.
+        """
+        config = channel.config or {}
+        bot_token = config.get("bot_token", "")
+        chat_id = config.get("chat_id", "")
+
+        if not bot_token or not chat_id:
+            log.error(
+                "publish.missing_config",
+                channel_id=str(channel.id),
+                channel_name=channel.name,
+            )
+            raise PublishError(
+                f"Channel '{channel.name}' missing bot_token or chat_id"
+            )
+
+        return bot_token, chat_id
+
+    def _format_message(
+        self, adaptation: ChannelAdaptation, bot_token: str
+    ) -> str:
+        """Format the adaptation into a Telegram-ready HTML message.
+
+        Args:
+            adaptation: The content adaptation to format.
+            bot_token: Bot token for TelegramClient initialization.
+
+        Returns:
+            HTML-formatted message string.
+        """
+        client = TelegramClient(bot_token)
+        return client.format_post(
+            headline=adaptation.headline or "",
+            body=adaptation.body or "",
+        )
+
+    def _send(self, bot_token: str, chat_id: str, html_text: str) -> dict:
+        """Send the message via Telegram.
+
+        Args:
+            bot_token: Telegram bot token.
+            chat_id: Target chat/channel ID.
+            html_text: Formatted message.
+
+        Returns:
+            Dict with message_id and raw_response.
+
+        Raises:
+            PublishRetryError: On transient failures.
+            PublishError: On permanent failures.
+        """
+        client = TelegramClient(bot_token)
+        result = client.send_message(chat_id, html_text)
+
+        if result.success:
+            return {
+                "message_id": result.message_id,
+                "raw_response": result.raw_response,
+            }
+
+        if result.retryable:
+            raise PublishRetryError(result.error)
+
+        raise PublishError(result.error)
+
+    def _mark_published(
+        self,
+        job: PublishJob,
+        adaptation: ChannelAdaptation,
+        result: dict,
+        chat_id: str,
+    ) -> None:
+        """Mark job and adaptation as published.
+
+        Args:
+            job: The PublishJob to update.
+            adaptation: The ChannelAdaptation to update.
+            result: Send result with message_id and raw_response.
+            chat_id: Chat ID where message was sent.
+        """
+        job.status = "published"
+        job.published_at = datetime.now(timezone.utc)
+        job.platform_post_id = result["message_id"]
+        job.platform_response = result["raw_response"]
+        job.error_message = None
+
+        adaptation.status = "published"
+
+        self.session.commit()
+
+        log.info(
+            "publish.success",
+            message_id=result["message_id"],
+            chat_id=chat_id,
+        )
+
+    def _fail_job(self, job: PublishJob, error: str) -> None:
+        """Mark a job as failed.
+
+        Args:
+            job: The PublishJob to mark.
+            error: Error message to store.
+        """
+        job.status = "failed"
+        job.error_message = error
+        job.retry_count += 1
+        self.session.commit()

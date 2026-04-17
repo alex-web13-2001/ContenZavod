@@ -1,6 +1,6 @@
 # ContenZavod — Схема базы данных
 
-> Последнее обновление: 2026-04-15
+> Последнее обновление: 2026-04-18
 > Миграции: Alembic (backend/migrations/)
 
 ## Общие принципы
@@ -137,11 +137,32 @@
 |------|-----|----------|
 | id | UUID PK | |
 | tenant_id | UUID FK | |
+| project_id | UUID FK → projects | nullable |
 | name | VARCHAR(255) | |
 | channel_type | VARCHAR(50) | telegram / youtube / website |
-| config | JSONB | encrypted: tokens, IDs, OAuth |
+| content_formats | JSONB | ["short_post", "longread", ...] |
+| tone_of_voice | TEXT | Инструкции по тону |
+| languages | JSONB | ["ru", "en"] |
+| config | JSONB | bot_token, chat_id (Telegram) |
 | posting_rules | JSONB | schedule, max per day |
+| editorial_rules | TEXT | Редакционные правила |
 | is_active | BOOLEAN | |
+| created_at | TIMESTAMPTZ | |
+
+### channel_adaptations
+Адаптации контента под конкретный канал и формат.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | UUID PK | |
+| tenant_id | UUID FK | |
+| channel_id | UUID FK → channels | |
+| material_id | UUID FK → raw_materials | |
+| content_format | VARCHAR(50) | short_post / longread / video_script / digest |
+| headline | VARCHAR(500) | Заголовок адаптации |
+| body | TEXT | Основной текст |
+| metadata | JSONB | hashtags, hooks, структура |
+| status | VARCHAR(50) | draft / approved / rejected / published |
 | created_at | TIMESTAMPTZ | |
 
 ### publish_jobs
@@ -151,7 +172,7 @@
 |------|-----|----------|
 | id | UUID PK | |
 | tenant_id | UUID FK | |
-| content_id | UUID FK → adapted_contents | |
+| content_id | UUID FK → channel_adaptations | |
 | channel_id | UUID FK → channels | |
 | media_asset_id | UUID FK → media_assets | nullable |
 | status | VARCHAR(50) | scheduled / queued / publishing / published / failed / cancelled |
