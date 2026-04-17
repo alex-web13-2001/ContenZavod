@@ -99,6 +99,7 @@ async def delete_project(
 async def list_project_recommendations(
     project_id: str,
     recommended_only: bool = Query(True),
+    category: str | None = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -125,6 +126,14 @@ async def list_project_recommendations(
     if recommended_only:
         query = query.where(MaterialProjectScore.is_recommended == True)
 
+    # Category filter — requires join with RawMaterial
+    if category:
+        query = query.join(
+            RawMaterial, MaterialProjectScore.material_id == RawMaterial.id
+        ).where(
+            RawMaterial.metadata_["ai_classification"]["category"].astext == category
+        )
+
     query = query.order_by(MaterialProjectScore.created_at.desc())
 
     # Count
@@ -140,6 +149,7 @@ async def list_project_recommendations(
     items = []
     for s in scores:
         material = await db.get(RawMaterial, s.material_id)
+        ai_data = (material.metadata_.get("ai_classification", {}) if material else {})
         items.append({
             "id": str(s.id),
             "material_id": str(s.material_id),
@@ -152,7 +162,43 @@ async def list_project_recommendations(
             "material_title": material.title if material else None,
             "material_url": material.original_url if material else None,
             "material_status": material.status if material else None,
+            "category": ai_data.get("category"),
         })
 
     return {"items": items, "total": total, "page": page, "per_page": per_page}
+
+
+@router.get("/{project_id}/categories")
+async def list_project_categories(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _user: str = Depends(get_current_user_id),
+):
+    """Return distinct categories for materials recommended to this project."""
+    import uuid as _uuid
+    from sqlalchemy import select, func
+    from app.models.project_score import MaterialProjectScore
+    from app.models.material import RawMaterial
+
+    tid = _uuid.UUID(tenant_id)
+    pid = _uuid.UUID(project_id)
+
+    cat_col = RawMaterial.metadata_["ai_classification"]["category"].astext
+
+    query = (
+        select(cat_col, func.count().label("cnt"))
+        .join(MaterialProjectScore, MaterialProjectScore.material_id == RawMaterial.id)
+        .where(
+            MaterialProjectScore.project_id == pid,
+            MaterialProjectScore.tenant_id == tid,
+            MaterialProjectScore.is_recommended == True,
+            cat_col.isnot(None),
+        )
+        .group_by(cat_col)
+        .order_by(func.count().desc())
+    )
+
+    rows = (await db.execute(query)).all()
+    return [{"category": r[0], "count": r[1]} for r in rows]
 

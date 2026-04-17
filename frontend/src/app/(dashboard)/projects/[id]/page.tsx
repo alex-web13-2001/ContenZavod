@@ -195,6 +195,8 @@ export default function ProjectDetailPage() {
   );
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [onlyRecommended, setOnlyRecommended] = useState(true);
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [availableCategories, setAvailableCategories] = useState<{ category: string; count: number }[]>([]);
 
   // Channel creation form
   const [showChannelForm, setShowChannelForm] = useState(false);
@@ -334,14 +336,18 @@ export default function ProjectDetailPage() {
       params.set("per_page", "50");
       if (onlyRecommended) params.set("recommended_only", "true");
       else params.set("recommended_only", "false");
+      if (categoryFilter) params.set("category", categoryFilter);
 
-      // Fetch recommendations AND all adaptations in parallel
-      const [recsData, adapData] = await Promise.all([
+      // Fetch recommendations, adaptations, and categories in parallel
+      const [recsData, adapData, catsData] = await Promise.all([
         api.get<{ items: Material[]; total: number }>(
           `/projects/${projectId}/recommendations?${params}`
         ),
         api.get<{ items: Adaptation[] }>(
           `/adaptations?project_id=${projectId}&per_page=200`
+        ),
+        api.get<{ category: string; count: number }[]>(
+          `/projects/${projectId}/categories`
         ),
       ]);
 
@@ -354,6 +360,7 @@ export default function ProjectDetailPage() {
         project_explanation: m.explanation,
       }));
       setMaterials(mapped);
+      setAvailableCategories(catsData);
 
       // Group adaptations by material_id
       const grouped: Record<string, Adaptation[]> = {};
@@ -365,7 +372,7 @@ export default function ProjectDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [projectId, onlyRecommended]);
+  }, [projectId, onlyRecommended, categoryFilter]);
 
   const handleAdaptationAction = async (adaptationId: string, action: "approved" | "rejected") => {
     try {
@@ -576,6 +583,86 @@ export default function ProjectDetailPage() {
               {materials.length} материалов
             </span>
           </div>
+
+          {/* Category filter chips */}
+          {availableCategories.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "8px",
+                marginBottom: "16px",
+                alignItems: "center",
+              }}
+            >
+              <button
+                onClick={() => setCategoryFilter("")}
+                style={{
+                  padding: "6px 14px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  borderRadius: "20px",
+                  border: !categoryFilter
+                    ? `2px solid hsl(var(--cz-accent))`
+                    : `1px solid hsl(var(--cz-border))`,
+                  backgroundColor: !categoryFilter
+                    ? `hsl(var(--cz-accent) / 0.15)`
+                    : "transparent",
+                  color: !categoryFilter
+                    ? `hsl(var(--cz-accent))`
+                    : `hsl(var(--cz-text-secondary))`,
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+              >
+                Все
+              </button>
+              {availableCategories.map((cat) => {
+                const info = categoryLabels[cat.category];
+                const isActive = categoryFilter === cat.category;
+                return (
+                  <button
+                    key={cat.category}
+                    onClick={() =>
+                      setCategoryFilter(isActive ? "" : cat.category)
+                    }
+                    style={{
+                      padding: "6px 14px",
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      borderRadius: "20px",
+                      border: isActive
+                        ? `2px solid hsl(var(--cz-accent))`
+                        : `1px solid hsl(var(--cz-border))`,
+                      backgroundColor: isActive
+                        ? `hsl(var(--cz-accent) / 0.15)`
+                        : "transparent",
+                      color: isActive
+                        ? `hsl(var(--cz-accent))`
+                        : `hsl(var(--cz-text-secondary))`,
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "5px",
+                    }}
+                  >
+                    <span>{info?.emoji || "📰"}</span>
+                    {info?.label || cat.category}
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        opacity: 0.6,
+                        marginLeft: "2px",
+                      }}
+                    >
+                      {cat.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Materials list */}
           {loading ? (
