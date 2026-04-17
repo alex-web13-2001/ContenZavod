@@ -168,8 +168,11 @@ function renderMarkdownToHtml(text: string): string {
     .replace(/__(.+?)__/g, "<strong>$1</strong>")
     // Italic: *text* or _text_ (but not inside words)
     .replace(/(?<![\w*])\*([^*]+?)\*(?![\w*])/g, "<em>$1</em>")
+    .replace(/(?<!\w)_([^_]+?)_(?!\w)/g, "<em>$1</em>")
     // Headers: ### text → bold block
     .replace(/^#{1,3}\s+(.+)$/gm, "<strong style=\"display:block;margin:8px 0 4px\">$1</strong>")
+    // Section markers: [ОСНОВНАЯ ЧАСТЬ] etc → bold section header
+    .replace(/^\[([A-ZА-ЯЁ][A-ZА-ЯЁ\s\-:0-9]+)\]$/gm, "<strong style=\"display:block;margin:12px 0 4px;font-size:0.9em;color:hsl(var(--cz-text-muted))\">$1</strong>")
     // Line breaks
     .replace(/\n/g, "<br/>");
   return html;
