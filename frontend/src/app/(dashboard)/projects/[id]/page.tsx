@@ -163,7 +163,7 @@ export default function ProjectDetailPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [adaptations, setAdaptations] = useState<Record<string, Adaptation[]>>({});
-  const [loadingAdaptations, setLoadingAdaptations] = useState<Record<string, boolean>>({});
+  // loadingAdaptations removed — adaptations loaded eagerly
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"recommendations" | "channels" | "settings">(
     "recommendations"
@@ -302,18 +302,25 @@ export default function ProjectDetailPage() {
     }
   }, [projectId]);
 
-  const fetchMaterials = useCallback(async () => {
+  const fetchRecommendationsAndAdaptations = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       params.set("per_page", "50");
       if (onlyRecommended) params.set("recommended_only", "true");
       else params.set("recommended_only", "false");
-      const data = await api.get<{ items: Material[]; total: number }>(
-        `/projects/${projectId}/recommendations?${params}`
-      );
-      // Map fields
-      const mapped = data.items.map((m) => ({
+
+      // Fetch recommendations AND all adaptations in parallel
+      const [recsData, adapData] = await Promise.all([
+        api.get<{ items: Material[]; total: number }>(
+          `/projects/${projectId}/recommendations?${params}`
+        ),
+        api.get<{ items: Adaptation[] }>(
+          `/adaptations?project_id=${projectId}&per_page=200`
+        ),
+      ]);
+
+      const mapped = recsData.items.map((m) => ({
         ...m,
         title: m.material_title || "Untitled",
         original_url: m.material_url || "",
@@ -322,37 +329,24 @@ export default function ProjectDetailPage() {
         project_explanation: m.explanation,
       }));
       setMaterials(mapped);
+
+      // Group adaptations by material_id
+      const grouped: Record<string, Adaptation[]> = {};
+      for (const a of adapData.items) {
+        if (!grouped[a.material_id]) grouped[a.material_id] = [];
+        grouped[a.material_id].push(a);
+      }
+      setAdaptations(grouped);
     } finally {
       setLoading(false);
     }
   }, [projectId, onlyRecommended]);
 
-  const fetchAdaptations = useCallback(async (materialId: string) => {
-    setLoadingAdaptations((prev) => ({ ...prev, [materialId]: true }));
-    try {
-      const data = await api.get<{ items: Adaptation[] }>(
-        `/adaptations?project_id=${projectId}&per_page=100`
-      );
-      // Group by material_id
-      const filtered = data.items.filter((a) => a.material_id === materialId);
-      setAdaptations((prev) => ({ ...prev, [materialId]: filtered }));
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingAdaptations((prev) => ({ ...prev, [materialId]: false }));
-    }
-  }, [projectId]);
-
   const handleAdaptationAction = async (adaptationId: string, action: "approved" | "rejected") => {
     try {
       await api.patch(`/adaptations/${adaptationId}`, { status: action });
-      // Refresh adaptations for the relevant material
-      for (const [matId, adps] of Object.entries(adaptations)) {
-        if (adps.some((a) => a.id === adaptationId)) {
-          fetchAdaptations(matId);
-          break;
-        }
-      }
+      // Refresh everything
+      fetchRecommendationsAndAdaptations();
     } catch (e) {
       console.error(e);
     }
@@ -364,8 +358,8 @@ export default function ProjectDetailPage() {
   }, [fetchProject, fetchChannels]);
 
   useEffect(() => {
-    if (tab === "recommendations") fetchMaterials();
-  }, [tab, fetchMaterials]);
+    if (tab === "recommendations") fetchRecommendationsAndAdaptations();
+  }, [tab, fetchRecommendationsAndAdaptations]);
 
   if (!project) {
     return (
@@ -489,15 +483,15 @@ export default function ProjectDetailPage() {
 
       {/* Tab content */}
       {tab === "recommendations" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           {/* Filter bar */}
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <label
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "6px",
-                fontSize: "13px",
+                gap: "8px",
+                fontSize: "15px",
                 color: `hsl(var(--cz-text-secondary))`,
                 cursor: "pointer",
               }}
@@ -506,13 +500,13 @@ export default function ProjectDetailPage() {
                 type="checkbox"
                 checked={onlyRecommended}
                 onChange={(e) => setOnlyRecommended(e.target.checked)}
-                style={{ accentColor: `hsl(var(--cz-primary))` }}
+                style={{ accentColor: `hsl(var(--cz-primary))`, width: "18px", height: "18px" }}
               />
               Только рекомендованные
             </label>
             <span
               style={{
-                fontSize: "12px",
+                fontSize: "14px",
                 color: `hsl(var(--cz-text-muted))`,
               }}
             >
@@ -522,21 +516,21 @@ export default function ProjectDetailPage() {
 
           {/* Materials list */}
           {loading ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="skeleton" style={{ height: "80px" }} />
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="skeleton" style={{ height: "200px", borderRadius: "16px" }} />
               ))}
             </div>
           ) : materials.length === 0 ? (
             <CzCard>
-              <div style={{ textAlign: "center", padding: "48px 24px" }}>
+              <div style={{ textAlign: "center", padding: "64px 24px" }}>
                 <Sparkles
-                  size={48}
-                  style={{ color: `hsl(var(--cz-text-muted))`, margin: "0 auto 16px" }}
+                  size={56}
+                  style={{ color: `hsl(var(--cz-text-muted))`, margin: "0 auto 20px" }}
                 />
                 <h3
                   style={{
-                    fontSize: "16px",
+                    fontSize: "20px",
                     fontWeight: 600,
                     color: `hsl(var(--cz-text-secondary))`,
                   }}
@@ -547,9 +541,9 @@ export default function ProjectDetailPage() {
                 </h3>
                 <p
                   style={{
-                    fontSize: "13px",
+                    fontSize: "15px",
                     color: `hsl(var(--cz-text-muted))`,
-                    marginTop: "6px",
+                    marginTop: "8px",
                   }}
                 >
                   Материалы появятся после классификации и AI-оценки
@@ -559,470 +553,358 @@ export default function ProjectDetailPage() {
           ) : (
             <div
               className="stagger-children"
-              style={{ display: "flex", flexDirection: "column", gap: "6px" }}
+              style={{ display: "flex", flexDirection: "column", gap: "20px" }}
             >
               {materials.map((m) => {
+                const matAdapts = adaptations[m.material_id || m.id] || [];
                 const cat = m.category ? categoryLabels[m.category] : null;
                 const isExpanded = expandedId === m.id;
 
                 return (
-                  <CzCard key={m.id} interactive padding="sm">
+                  <CzCard key={m.id} padding="lg">
+                    {/* ─── Header: badges + scores ─── */}
                     <div
-                      onClick={() =>
-                        setExpandedId(isExpanded ? null : m.id)
-                      }
-                      style={{ cursor: "pointer" }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: "14px",
+                      }}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          justifyContent: "space-between",
-                          gap: "16px",
-                        }}
-                      >
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                        {m.is_recommended && (
+                          <span
                             style={{
-                              display: "flex",
+                              padding: "3px 10px",
+                              fontSize: "12px",
+                              fontWeight: 700,
+                              borderRadius: "6px",
+                              backgroundColor: `hsl(var(--cz-success))`,
+                              color: "white",
+                              display: "inline-flex",
                               alignItems: "center",
-                              gap: "8px",
+                              gap: "5px",
                             }}
                           >
-                            {m.is_breaking && (
-                              <span
-                                style={{
-                                  padding: "1px 6px",
-                                  fontSize: "10px",
-                                  fontWeight: 700,
-                                  borderRadius: "4px",
-                                  backgroundColor: `hsl(var(--cz-error))`,
-                                  color: "white",
-                                  textTransform: "uppercase",
-                                }}
-                              >
-                                <Zap size={10} style={{ display: "inline" }} /> BREAKING
-                              </span>
-                            )}
-                            {m.is_recommended && (
-                              <span
-                                style={{
-                                  padding: "1px 6px",
-                                  fontSize: "10px",
-                                  fontWeight: 700,
-                                  borderRadius: "4px",
-                                  backgroundColor: `hsl(var(--cz-success))`,
-                                  color: "white",
-                                  textTransform: "uppercase",
-                                }}
-                              >
-                                <Sparkles
-                                  size={10}
-                                  style={{ display: "inline" }}
-                                />{" "}
-                                РЕКОМЕНДОВАНО
-                              </span>
-                            )}
-                            <span
-                              style={{
-                                fontSize: "14px",
-                                fontWeight: 500,
-                                color: `hsl(var(--cz-text-primary))`,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {m.title}
-                            </span>
-                          </div>
-
-                          {m.summary_ru && (
-                            <div
-                              style={{
-                                fontSize: "12px",
-                                color: `hsl(var(--cz-text-secondary))`,
-                                marginTop: "4px",
-                                lineHeight: "1.5",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                display: "-webkit-box",
-                                WebkitLineClamp: isExpanded ? 10 : 2,
-                                WebkitBoxOrient: "vertical",
-                              }}
-                            >
-                              {m.summary_ru}
-                            </div>
-                          )}
-
-                          {m.tags && m.tags.length > 0 && (
-                            <div
-                              style={{
-                                display: "flex",
-                                flexWrap: "wrap",
-                                gap: "4px",
-                                marginTop: "6px",
-                              }}
-                            >
-                              {m.tags.slice(0, isExpanded ? 10 : 3).map((tag) => (
-                                <span
-                                  key={tag}
-                                  style={{
-                                    padding: "2px 8px",
-                                    fontSize: "11px",
-                                    fontWeight: 500,
-                                    borderRadius: "6px",
-                                    backgroundColor: `hsl(var(--cz-accent) / 0.08)`,
-                                    color: `hsl(var(--cz-accent))`,
-                                    border: `1px solid hsl(var(--cz-accent) / 0.15)`,
-                                  }}
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Right side */}
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "flex-end",
-                            gap: "6px",
-                            flexShrink: 0,
-                          }}
-                        >
-                          <div
+                            <Sparkles size={13} /> РЕКОМЕНДОВАНО
+                          </span>
+                        )}
+                        {m.is_breaking && (
+                          <span
                             style={{
-                              display: "flex",
+                              padding: "3px 10px",
+                              fontSize: "12px",
+                              fontWeight: 700,
+                              borderRadius: "6px",
+                              backgroundColor: `hsl(var(--cz-error))`,
+                              color: "white",
+                              display: "inline-flex",
                               alignItems: "center",
-                              gap: "8px",
+                              gap: "5px",
                             }}
                           >
-                            {cat && (
-                              <span
-                                style={{
-                                  fontSize: "12px",
-                                  fontWeight: 500,
-                                  color: `hsl(var(--cz-text-secondary))`,
-                                }}
-                              >
-                                {cat.emoji} {cat.label}
-                              </span>
-                            )}
-                          </div>
-
-                          {m.project_hype_score != null && (
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                            >
-                              <span
-                                style={{
-                                  fontSize: "11px",
-                                  color: `hsl(var(--cz-text-muted))`,
-                                }}
-                              >
-                                Hype:
-                              </span>
-                              <ScoreBar score={m.project_hype_score} />
-                            </div>
-                          )}
-                          {m.project_relevance_score != null && (
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                              }}
-                            >
-                              <span
-                                style={{
-                                  fontSize: "11px",
-                                  color: `hsl(var(--cz-text-muted))`,
-                                }}
-                              >
-                                Релев:
-                              </span>
-                              <ScoreBar score={m.project_relevance_score} />
-                            </div>
-                          )}
-
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "4px",
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: "11px",
-                                color: `hsl(var(--cz-text-muted))`,
-                              }}
-                            >
-                              {new Date(m.created_at).toLocaleDateString("ru")}
-                            </span>
-                            {isExpanded ? (
-                              <ChevronUp
-                                size={14}
-                                style={{ color: `hsl(var(--cz-text-muted))` }}
-                              />
-                            ) : (
-                              <ChevronDown
-                                size={14}
-                                style={{ color: `hsl(var(--cz-text-muted))` }}
-                              />
-                            )}
-                          </div>
-                        </div>
+                            <Zap size={13} /> СРОЧНО
+                          </span>
+                        )}
+                        {cat && (
+                          <span style={{ fontSize: "14px", color: `hsl(var(--cz-text-secondary))` }}>
+                            {cat.emoji} {cat.label}
+                          </span>
+                        )}
+                        <span style={{ fontSize: "13px", color: `hsl(var(--cz-text-muted))` }}>
+                          {new Date(m.created_at).toLocaleDateString("ru", { day: "numeric", month: "short", year: "numeric" })}
+                        </span>
                       </div>
 
-                      {/* Expanded section */}
-                      {isExpanded && (
+                      {/* Scores */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "16px", flexShrink: 0 }}>
+                        {m.project_relevance_score != null && (
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "13px", color: `hsl(var(--cz-text-muted))` }}>Релевантность</span>
+                            <ScoreBar score={m.project_relevance_score} />
+                          </div>
+                        )}
+                        {m.project_hype_score != null && (
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "13px", color: `hsl(var(--cz-text-muted))` }}>Хайп</span>
+                            <ScoreBar score={m.project_hype_score} />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* ─── AI Rationale (why this material) ─── */}
+                    {m.project_explanation && (
+                      <div
+                        style={{
+                          padding: "14px 18px",
+                          borderRadius: "12px",
+                          backgroundColor: m.is_recommended
+                            ? `hsl(var(--cz-success) / 0.08)`
+                            : `hsl(var(--cz-warning) / 0.08)`,
+                          border: `1px solid ${
+                            m.is_recommended
+                              ? `hsl(var(--cz-success) / 0.2)`
+                              : `hsl(var(--cz-warning) / 0.2)`
+                          }`,
+                          marginBottom: "16px",
+                        }}
+                      >
                         <div
                           style={{
-                            marginTop: "12px",
-                            paddingTop: "12px",
-                            borderTop: `1px solid hsl(var(--cz-border))`,
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "10px",
+                            fontSize: "12px",
+                            fontWeight: 700,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em",
+                            color: m.is_recommended
+                              ? `hsl(var(--cz-success))`
+                              : `hsl(var(--cz-warning))`,
+                            marginBottom: "6px",
                           }}
                         >
-                          {/* AI explanation */}
-                          {m.project_explanation && (
+                          🤖 Почему эта новость
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "15px",
+                            lineHeight: "1.6",
+                            color: `hsl(var(--cz-text-primary))`,
+                          }}
+                        >
+                          {m.project_explanation}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ─── Original source link ─── */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        marginBottom: "16px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "15px",
+                          fontWeight: 600,
+                          color: `hsl(var(--cz-text-secondary))`,
+                          flex: 1,
+                        }}
+                      >
+                        📰 {m.title}
+                      </span>
+                      <a
+                        href={m.original_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          fontSize: "13px",
+                          color: `hsl(var(--cz-accent))`,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          textDecoration: "none",
+                          flexShrink: 0,
+                          padding: "4px 12px",
+                          borderRadius: "8px",
+                          border: `1px solid hsl(var(--cz-accent) / 0.2)`,
+                          backgroundColor: `hsl(var(--cz-accent) / 0.05)`,
+                        }}
+                      >
+                        <ExternalLink size={14} /> Оригинал
+                      </a>
+                    </div>
+
+                    {/* ─── Adaptations (shown immediately!) ─── */}
+                    {matAdapts.length > 0 ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                        <div
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: 700,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em",
+                            color: `hsl(var(--cz-text-muted))`,
+                          }}
+                        >
+                          ✍️ Адаптации для каналов ({matAdapts.length})
+                        </div>
+                        {matAdapts.map((ad) => {
+                          const statusColors: Record<string, string> = {
+                            draft: "var(--cz-warning)",
+                            approved: "var(--cz-success)",
+                            rejected: "var(--cz-error)",
+                            published: "var(--cz-info)",
+                          };
+                          const statusLabels: Record<string, string> = {
+                            draft: "Черновик",
+                            approved: "Одобрен",
+                            rejected: "Отклонён",
+                            published: "Опубликован",
+                          };
+                          return (
                             <div
+                              key={ad.id}
                               style={{
-                                padding: "10px",
-                                borderRadius: "var(--cz-radius-md)",
-                                backgroundColor: m.is_recommended
-                                  ? `hsl(var(--cz-success) / 0.1)`
-                                  : `hsl(var(--cz-warning) / 0.1)`,
-                                border: `1px solid ${
-                                  m.is_recommended
-                                    ? `hsl(var(--cz-success) / 0.2)`
-                                    : `hsl(var(--cz-warning) / 0.2)`
-                                }`,
-                                fontSize: "13px",
-                                lineHeight: "1.5",
-                                color: `hsl(var(--cz-text-secondary))`,
+                                padding: "16px 20px",
+                                borderRadius: "12px",
+                                backgroundColor: `hsl(var(--cz-bg-surface))`,
+                                border: `1px solid hsl(var(--cz-border))`,
                               }}
                             >
-                              <strong
+                              {/* Adaptation header */}
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                  <span style={{ fontSize: "14px", fontWeight: 600, color: `hsl(var(--cz-text-primary))` }}>
+                                    {ad.channel_name || "Канал"}
+                                  </span>
+                                  <span style={{
+                                    padding: "3px 10px",
+                                    fontSize: "12px",
+                                    fontWeight: 600,
+                                    borderRadius: "6px",
+                                    backgroundColor: `hsl(var(--cz-accent) / 0.1)`,
+                                    color: `hsl(var(--cz-accent))`,
+                                  }}>
+                                    {formatLabels[ad.content_format] || ad.content_format}
+                                  </span>
+                                  <span style={{
+                                    fontSize: "13px",
+                                    fontWeight: 500,
+                                    color: `hsl(var(--cz-text-muted))`,
+                                  }}>
+                                    {ad.language.toUpperCase()}
+                                  </span>
+                                </div>
+                                <span style={{
+                                  padding: "4px 12px",
+                                  fontSize: "12px",
+                                  fontWeight: 700,
+                                  borderRadius: "6px",
+                                  backgroundColor: `hsl(${statusColors[ad.status] || "var(--cz-text-muted)"} / 0.15)`,
+                                  color: `hsl(${statusColors[ad.status] || "var(--cz-text-muted)"})`,
+                                  textTransform: "uppercase",
+                                }}>
+                                  {statusLabels[ad.status] || ad.status}
+                                </span>
+                              </div>
+
+                              {/* Headline */}
+                              {ad.headline && (
+                                <div style={{
+                                  fontSize: "17px",
+                                  fontWeight: 700,
+                                  color: `hsl(var(--cz-text-primary))`,
+                                  marginBottom: "8px",
+                                  lineHeight: "1.4",
+                                }}>
+                                  {ad.headline}
+                                </div>
+                              )}
+
+                              {/* Body */}
+                              <div
+                                onClick={() => setExpandedId(isExpanded && expandedId === ad.id ? null : ad.id)}
                                 style={{
-                                  display: "block",
-                                  marginBottom: "4px",
-                                  color: m.is_recommended
-                                    ? `hsl(var(--cz-success))`
-                                    : `hsl(var(--cz-warning))`,
+                                  fontSize: "15px",
+                                  lineHeight: "1.7",
+                                  color: `hsl(var(--cz-text-secondary))`,
+                                  whiteSpace: "pre-wrap",
+                                  maxHeight: expandedId === ad.id ? "none" : "160px",
+                                  overflow: "hidden",
+                                  cursor: "pointer",
+                                  position: "relative",
                                 }}
                               >
-                                Оценка AI-редактора:
-                              </strong>
-                              {m.project_explanation}
-                            </div>
-                          )}
-
-                          {/* Channel adaptations */}
-                          {m.is_recommended && (
-                            <div
-                              style={{
-                                padding: "12px",
-                                borderRadius: "var(--cz-radius-md)",
-                                backgroundColor: `hsl(var(--cz-bg-surface))`,
-                                border: `1px solid hsl(var(--cz-border-subtle))`,
-                              }}
-                            >
-                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
-                                <div style={{ fontSize: "13px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))` }}>
-                                  📝 Адаптации для каналов
-                                </div>
-                                {!adaptations[m.material_id || m.id] && (
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); fetchAdaptations(m.material_id || m.id); }}
-                                    disabled={loadingAdaptations[m.material_id || m.id]}
-                                    style={{
-                                      padding: "4px 12px",
-                                      fontSize: "11px",
-                                      fontWeight: 600,
-                                      borderRadius: "6px",
-                                      border: `1px solid hsl(var(--cz-accent) / 0.3)`,
-                                      backgroundColor: `hsl(var(--cz-accent) / 0.1)`,
-                                      color: `hsl(var(--cz-accent))`,
-                                      cursor: "pointer",
-                                    }}
-                                  >
-                                    {loadingAdaptations[m.material_id || m.id] ? "Загрузка..." : "Показать"}
-                                  </button>
+                                {ad.body}
+                                {expandedId !== ad.id && ad.body && ad.body.length > 300 && (
+                                  <div style={{
+                                    position: "absolute",
+                                    bottom: 0,
+                                    left: 0,
+                                    right: 0,
+                                    height: "50px",
+                                    background: `linear-gradient(transparent, hsl(var(--cz-bg-surface)))`,
+                                    display: "flex",
+                                    alignItems: "flex-end",
+                                    justifyContent: "center",
+                                    paddingBottom: "4px",
+                                  }}>
+                                    <span style={{ fontSize: "13px", color: `hsl(var(--cz-accent))`, fontWeight: 600 }}>
+                                      Читать полностью ↓
+                                    </span>
+                                  </div>
                                 )}
                               </div>
 
-                              {adaptations[m.material_id || m.id] ? (
-                                adaptations[m.material_id || m.id].length === 0 ? (
-                                  <div style={{ fontSize: "12px", color: `hsl(var(--cz-text-muted))`, padding: "8px 0" }}>
-                                    Адаптации ещё не созданы — AI-генерация в процессе ⏳
-                                  </div>
-                                ) : (
-                                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                    {adaptations[m.material_id || m.id].map((ad) => {
-                                      const chCfg = platformConfig[ad.channel_type || ""];
-                                      const statusColors: Record<string, string> = {
-                                        draft: "var(--cz-warning)",
-                                        approved: "var(--cz-success)",
-                                        rejected: "var(--cz-error)",
-                                        published: "var(--cz-info)",
-                                      };
-                                      const statusLabels: Record<string, string> = {
-                                        draft: "Черновик",
-                                        approved: "Одобрен",
-                                        rejected: "Отклонён",
-                                        published: "Опубликован",
-                                      };
-                                      return (
-                                        <div
-                                          key={ad.id}
-                                          style={{
-                                            padding: "10px",
-                                            borderRadius: "8px",
-                                            backgroundColor: `hsl(var(--cz-bg-hover))`,
-                                            border: `1px solid hsl(var(--cz-border))`,
-                                          }}
-                                        >
-                                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-                                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                              <span style={{ fontSize: "12px", fontWeight: 600, color: chCfg?.color || `hsl(var(--cz-text-primary))` }}>
-                                                {ad.channel_name || "Канал"}
-                                              </span>
-                                              <span style={{ fontSize: "10px", color: `hsl(var(--cz-text-muted))` }}>·</span>
-                                              <span style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))` }}>
-                                                {formatLabels[ad.content_format] || ad.content_format}
-                                              </span>
-                                              <span style={{ fontSize: "10px", color: `hsl(var(--cz-text-muted))` }}>·</span>
-                                              <span style={{ fontSize: "11px", fontWeight: 500, color: `hsl(var(--cz-text-secondary))` }}>
-                                                {ad.language.toUpperCase()}
-                                              </span>
-                                            </div>
-                                            <span style={{
-                                              padding: "2px 8px",
-                                              fontSize: "10px",
-                                              fontWeight: 700,
-                                              borderRadius: "4px",
-                                              backgroundColor: `hsl(${statusColors[ad.status] || "var(--cz-text-muted)"} / 0.15)`,
-                                              color: `hsl(${statusColors[ad.status] || "var(--cz-text-muted)"})`,
-                                              textTransform: "uppercase",
-                                            }}>
-                                              {statusLabels[ad.status] || ad.status}
-                                            </span>
-                                          </div>
-
-                                          {ad.headline && (
-                                            <div style={{ fontSize: "13px", fontWeight: 600, color: `hsl(var(--cz-text-primary))`, marginBottom: "4px" }}>
-                                              {ad.headline}
-                                            </div>
-                                          )}
-                                          <div style={{
-                                            fontSize: "12px",
-                                            lineHeight: "1.6",
-                                            color: `hsl(var(--cz-text-secondary))`,
-                                            whiteSpace: "pre-wrap",
-                                            maxHeight: "120px",
-                                            overflow: "auto",
-                                          }}>
-                                            {ad.body}
-                                          </div>
-
-                                          {ad.status === "draft" && (
-                                            <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
-                                              <button
-                                                onClick={(e) => { e.stopPropagation(); handleAdaptationAction(ad.id, "approved"); }}
-                                                style={{
-                                                  padding: "4px 14px",
-                                                  fontSize: "11px",
-                                                  fontWeight: 600,
-                                                  borderRadius: "6px",
-                                                  border: "none",
-                                                  backgroundColor: `hsl(var(--cz-success))`,
-                                                  color: "white",
-                                                  cursor: "pointer",
-                                                  display: "flex",
-                                                  alignItems: "center",
-                                                  gap: "4px",
-                                                }}
-                                              >
-                                                <Check size={12} /> Одобрить
-                                              </button>
-                                              <button
-                                                onClick={(e) => { e.stopPropagation(); handleAdaptationAction(ad.id, "rejected"); }}
-                                                style={{
-                                                  padding: "4px 14px",
-                                                  fontSize: "11px",
-                                                  fontWeight: 600,
-                                                  borderRadius: "6px",
-                                                  border: `1px solid hsl(var(--cz-error) / 0.3)`,
-                                                  backgroundColor: "transparent",
-                                                  color: `hsl(var(--cz-error))`,
-                                                  cursor: "pointer",
-                                                  display: "flex",
-                                                  alignItems: "center",
-                                                  gap: "4px",
-                                                }}
-                                              >
-                                                <X size={12} /> Отклонить
-                                              </button>
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )
-                              ) : (
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                                  {channels.map((ch) => {
-                                    const cfg = platformConfig[ch.channel_type];
-                                    const Icon = cfg?.icon || Send;
-                                    return ch.languages.map((lang) => (
-                                      <span key={`${ch.id}-${lang}`} style={{
-                                        display: "inline-flex", alignItems: "center", gap: "4px",
-                                        padding: "4px 8px", fontSize: "11px", fontWeight: 500,
-                                        borderRadius: "6px", backgroundColor: `hsl(var(--cz-bg-hover))`,
-                                        color: `hsl(var(--cz-text-secondary))`,
-                                      }}>
-                                        <Icon size={12} />
-                                        {ch.name} · {lang.toUpperCase()}
-                                      </span>
-                                    ));
-                                  })}
+                              {/* Action buttons */}
+                              {ad.status === "draft" && (
+                                <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+                                  <button
+                                    onClick={() => handleAdaptationAction(ad.id, "approved")}
+                                    style={{
+                                      padding: "8px 24px",
+                                      fontSize: "14px",
+                                      fontWeight: 600,
+                                      borderRadius: "8px",
+                                      border: "none",
+                                      backgroundColor: `hsl(var(--cz-success))`,
+                                      color: "white",
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                      transition: "opacity 0.2s",
+                                    }}
+                                    onMouseOver={(e) => (e.currentTarget.style.opacity = "0.85")}
+                                    onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
+                                  >
+                                    <Check size={16} /> Одобрить
+                                  </button>
+                                  <button
+                                    onClick={() => handleAdaptationAction(ad.id, "rejected")}
+                                    style={{
+                                      padding: "8px 24px",
+                                      fontSize: "14px",
+                                      fontWeight: 600,
+                                      borderRadius: "8px",
+                                      border: `1px solid hsl(var(--cz-error) / 0.3)`,
+                                      backgroundColor: "transparent",
+                                      color: `hsl(var(--cz-error))`,
+                                      cursor: "pointer",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                      transition: "opacity 0.2s",
+                                    }}
+                                    onMouseOver={(e) => (e.currentTarget.style.opacity = "0.85")}
+                                    onMouseOut={(e) => (e.currentTarget.style.opacity = "1")}
+                                  >
+                                    <X size={16} /> Отклонить
+                                  </button>
                                 </div>
                               )}
                             </div>
-                          )}
-
-                          <a
-                            href={m.original_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            style={{
-                              fontSize: "12px",
-                              color: `hsl(var(--cz-accent))`,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "4px",
-                              textDecoration: "none",
-                            }}
-                          >
-                            <ExternalLink size={12} /> Оригинал
-                          </a>
+                          );
+                        })}
+                      </div>
+                    ) : m.is_recommended ? (
+                      <div
+                        style={{
+                          padding: "20px",
+                          borderRadius: "12px",
+                          backgroundColor: `hsl(var(--cz-bg-surface))`,
+                          border: `1px dashed hsl(var(--cz-border))`,
+                          textAlign: "center",
+                        }}
+                      >
+                        <div style={{ fontSize: "15px", color: `hsl(var(--cz-text-muted))` }}>
+                          ⏳ AI генерирует адаптации для каналов...
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    ) : null}
                   </CzCard>
                 );
               })}
@@ -1030,6 +912,8 @@ export default function ProjectDetailPage() {
           )}
         </div>
       )}
+
+
 
       {tab === "channels" && (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
