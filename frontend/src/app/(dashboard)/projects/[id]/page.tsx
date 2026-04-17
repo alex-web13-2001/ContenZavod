@@ -171,8 +171,10 @@ function renderMarkdownToHtml(text: string): string {
     .replace(/(?<!\w)_([^_]+?)_(?!\w)/g, "<em>$1</em>")
     // Headers: ### text → bold block
     .replace(/^#{1,3}\s+(.+)$/gm, "<strong style=\"display:block;margin:8px 0 4px\">$1</strong>")
-    // Section markers: [ОСНОВНАЯ ЧАСТЬ] etc → bold section header
-    .replace(/^\[([A-ZА-ЯЁ][A-ZА-ЯЁ\s\-:0-9]+)\]$/gm, "<strong style=\"display:block;margin:12px 0 4px;font-size:0.9em;color:hsl(var(--cz-text-muted))\">$1</strong>")
+    // Section markers: [Хук: 0-5 секунд], [ОСНОВНАЯ ЧАСТЬ] etc → bold section header
+    .replace(/^\[([A-ZА-ЯЁa-zа-яё][A-ZА-ЯЁa-zа-яё\s\-:0-9]+)\]$/gm, "<strong style=\"display:block;margin:12px 0 4px;font-size:0.9em;color:hsl(var(--cz-text-muted))\">$1</strong>")
+    // Links: [text](url) → clickable link
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<a href=\"$2\" target=\"_blank\" rel=\"noopener\" style=\"color:hsl(var(--cz-accent));text-decoration:underline\">$1</a>")
     // Line breaks
     .replace(/\n/g, "<br/>");
   return html;
