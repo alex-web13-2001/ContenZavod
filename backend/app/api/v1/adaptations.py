@@ -3,6 +3,7 @@
 Endpoints:
     GET  /adaptations?channel_id=&project_id=&status=draft  — list adaptations
     PATCH /adaptations/{id}                                 — approve/reject/edit
+    POST /adaptations/generate                              — generate specific format on-demand
 """
 
 import uuid
@@ -45,6 +46,14 @@ class AdaptationUpdate(BaseModel):
     status: str | None = Field(None, pattern=r"^(draft|approved|published|rejected)$")
     headline: str | None = None
     body: str | None = None
+
+
+class GenerateRequest(BaseModel):
+    """Request to generate an adaptation for a specific format on-demand."""
+    material_id: str
+    channel_id: str
+    content_format: str = Field(..., pattern=r"^(short_post|longread|video_script|digest)$")
+    language: str = "ru"
 
 
 # --- Endpoints ---
@@ -143,4 +152,62 @@ async def update_adaptation(
         "headline": adaptation.headline,
         "body": adaptation.body,
         "content_format": adaptation.content_format,
+    }
+
+
+@router.post("/generate", status_code=status.HTTP_202_ACCEPTED)
+async def generate_adaptation(
+    data: GenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user_id),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Generate an adaptation for a specific format on-demand.
+
+    Queues a Celery task and returns immediately (202 Accepted).
+    The editor can poll /adaptations to see when it appears.
+    """
+    # Verify material exists and belongs to tenant
+    material = await db.get(RawMaterial, uuid.UUID(data.material_id))
+    if not material or str(material.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Material not found")
+
+    # Verify channel exists and belongs to tenant
+    channel = await db.get(Channel, uuid.UUID(data.channel_id))
+    if not channel or str(channel.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    # Check if adaptation already exists
+    existing = await db.execute(
+        select(ChannelAdaptation).where(
+            ChannelAdaptation.material_id == material.id,
+            ChannelAdaptation.channel_id == channel.id,
+            ChannelAdaptation.language == data.language,
+            ChannelAdaptation.content_format == data.content_format,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409,
+            detail="Adaptation for this format already exists",
+        )
+
+    # Queue the Celery task
+    from workers.ai_tasks import adapt_single_format
+
+    task = adapt_single_format.delay(
+        data.material_id,
+        data.channel_id,
+        data.content_format,
+        data.language,
+        tenant_id,
+    )
+
+    return {
+        "status": "queued",
+        "task_id": task.id,
+        "material_id": data.material_id,
+        "channel_id": data.channel_id,
+        "content_format": data.content_format,
+        "language": data.language,
     }

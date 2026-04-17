@@ -273,10 +273,13 @@ def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
 
 @shared_task(bind=True, name="workers.ai_tasks.adapt_material_for_channels", max_retries=3)
 def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_id: str):
-    """Generate adapted content for all channels × formats × languages in a project.
+    """Generate adapted content for the PRIMARY format of each channel.
+
+    Only the first format in channel.content_formats is generated automatically.
+    Additional formats can be generated on-demand via the /adaptations/generate API.
 
     For each active channel:
-      For each content_format:
+      For the PRIMARY content_format (first in list):
         For each language:
           → Call AI adapter → Store ChannelAdaptation
     """
@@ -318,66 +321,158 @@ def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_
 
         adapted = 0
         for channel in channels:
-            for content_format in channel.content_formats:
-                for language in channel.languages:
-                    # Check if adaptation already exists (idempotency)
-                    existing = session.execute(
-                        select(ChannelAdaptation).where(
-                            ChannelAdaptation.material_id == material.id,
-                            ChannelAdaptation.channel_id == channel.id,
-                            ChannelAdaptation.language == language,
-                            ChannelAdaptation.content_format == content_format,
-                        )
-                    ).scalar_one_or_none()
+            # Only generate the PRIMARY format (first in the list)
+            primary_format = channel.content_formats[0] if channel.content_formats else "short_post"
+            for language in channel.languages:
+                # Check if adaptation already exists (idempotency)
+                existing = session.execute(
+                    select(ChannelAdaptation).where(
+                        ChannelAdaptation.material_id == material.id,
+                        ChannelAdaptation.channel_id == channel.id,
+                        ChannelAdaptation.language == language,
+                        ChannelAdaptation.content_format == primary_format,
+                    )
+                ).scalar_one_or_none()
 
-                    if existing:
-                        continue
+                if existing:
+                    continue
 
-                    try:
-                        result = _run_async(adapt_material_for_channel(
-                            material_data=material_data,
-                            channel_name=channel.name,
-                            channel_type=channel.channel_type,
-                            content_format=content_format,
-                            tone_of_voice=channel.tone_of_voice,
+                try:
+                    result = _run_async(adapt_material_for_channel(
+                        material_data=material_data,
+                        channel_name=channel.name,
+                        channel_type=channel.channel_type,
+                        content_format=primary_format,
+                        tone_of_voice=channel.tone_of_voice,
+                        language=language,
+                    ))
+
+                    if result:
+                        adaptation = ChannelAdaptation(
+                            material_id=material.id,
+                            channel_id=channel.id,
+                            tenant_id=material.tenant_id,
                             language=language,
-                        ))
-
-                        if result:
-                            adaptation = ChannelAdaptation(
-                                material_id=material.id,
-                                channel_id=channel.id,
-                                tenant_id=material.tenant_id,
-                                language=language,
-                                content_format=content_format,
-                                headline=result.get("headline", ""),
-                                body=result.get("body", ""),
-                                priority=result.get("priority", "normal"),
-                                status="draft",
-                            )
-                            session.add(adaptation)
-                            session.commit()
-                            adapted += 1
-
-                            log.info(
-                                "ai.adapt_channels.created",
-                                channel=channel.name,
-                                format=content_format,
-                                language=language,
-                                priority=result.get("priority"),
-                            )
-
-                    except AIServiceTemporarilyUnavailable as e:
-                        log.warning("ai.adapt_channels.api_unavailable", error=str(e))
-                        session.commit()
-                        raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
-                    except Exception as e:
-                        log.error(
-                            "ai.adapt_channels.adapt_failed",
-                            channel=channel.name, language=language,
-                            error=str(e),
+                            content_format=primary_format,
+                            headline=result.get("headline", ""),
+                            body=result.get("body", ""),
+                            priority=result.get("priority", "normal"),
+                            status="draft",
                         )
-                        continue
+                        session.add(adaptation)
+                        session.commit()
+                        adapted += 1
+
+                        log.info(
+                            "ai.adapt_channels.created",
+                            channel=channel.name,
+                            format=primary_format,
+                            language=language,
+                            priority=result.get("priority"),
+                        )
+
+                except AIServiceTemporarilyUnavailable as e:
+                    log.warning("ai.adapt_channels.api_unavailable", error=str(e))
+                    session.commit()
+                    raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+                except Exception as e:
+                    log.error(
+                        "ai.adapt_channels.adapt_failed",
+                        channel=channel.name, language=language,
+                        error=str(e),
+                    )
+                    continue
 
     log.info("ai.adapt_channels.done", adapted=adapted)
     return {"status": "ok", "adapted": adapted}
+
+
+@shared_task(bind=True, name="workers.ai_tasks.adapt_single_format", max_retries=3)
+def adapt_single_format(
+    self, material_id: str, channel_id: str, content_format: str, language: str, tenant_id: str
+):
+    """Generate adaptation for a SINGLE material × channel × format × language.
+
+    Called on-demand from the editorial UI when the editor clicks
+    "Generate as Longread" / "Generate as Video Script" etc.
+    """
+    log = logger.bind(
+        material_id=material_id, channel_id=channel_id,
+        content_format=content_format, language=language,
+    )
+    log.info("ai.adapt_single.start")
+
+    from app.models.channel import Channel
+    from app.models.channel_adaptation import ChannelAdaptation
+
+    with get_sync_session() as session:
+        material = session.get(RawMaterial, uuid.UUID(material_id))
+        if not material:
+            log.error("ai.adapt_single.material_not_found")
+            return {"status": "error", "reason": "not_found"}
+
+        channel = session.get(Channel, uuid.UUID(channel_id))
+        if not channel:
+            log.error("ai.adapt_single.channel_not_found")
+            return {"status": "error", "reason": "channel_not_found"}
+
+        # Idempotency check
+        existing = session.execute(
+            select(ChannelAdaptation).where(
+                ChannelAdaptation.material_id == material.id,
+                ChannelAdaptation.channel_id == channel.id,
+                ChannelAdaptation.language == language,
+                ChannelAdaptation.content_format == content_format,
+            )
+        ).scalar_one_or_none()
+
+        if existing:
+            log.info("ai.adapt_single.already_exists")
+            return {"status": "ok", "adaptation_id": str(existing.id), "already_existed": True}
+
+        from ai.adapter import adapt_material_for_channel, AIServiceTemporarilyUnavailable
+
+        ai_data = material.metadata_.get("ai_classification", {})
+        material_data = {
+            "original_title": material.title,
+            "summary_ru": ai_data.get("summary_ru"),
+            "summary_en": ai_data.get("summary_en"),
+            "content_text": material.content_text,
+            "original_url": material.original_url,
+        }
+
+        try:
+            result = _run_async(adapt_material_for_channel(
+                material_data=material_data,
+                channel_name=channel.name,
+                channel_type=channel.channel_type,
+                content_format=content_format,
+                tone_of_voice=channel.tone_of_voice,
+                language=language,
+            ))
+
+            if result:
+                adaptation = ChannelAdaptation(
+                    material_id=material.id,
+                    channel_id=channel.id,
+                    tenant_id=material.tenant_id,
+                    language=language,
+                    content_format=content_format,
+                    headline=result.get("headline", ""),
+                    body=result.get("body", ""),
+                    priority=result.get("priority", "normal"),
+                    status="draft",
+                )
+                session.add(adaptation)
+                session.commit()
+                log.info("ai.adapt_single.created", adaptation_id=str(adaptation.id))
+                return {"status": "ok", "adaptation_id": str(adaptation.id)}
+
+        except AIServiceTemporarilyUnavailable as e:
+            log.warning("ai.adapt_single.api_unavailable", error=str(e))
+            raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+        except Exception as e:
+            log.error("ai.adapt_single.failed", error=str(e))
+            raise self.retry(exc=e, countdown=30 * (self.request.retries + 1))
+
+    return {"status": "error", "reason": "empty_result"}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { CzCard, CzBadge } from "@/components/ui-system";
@@ -374,6 +374,44 @@ export default function ProjectDetailPage() {
       fetchRecommendationsAndAdaptations();
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  // On-demand format generation
+  const [generatingFormats, setGeneratingFormats] = useState<Record<string, boolean>>({});
+
+  const handleGenerateFormat = async (
+    materialId: string,
+    channelId: string,
+    contentFormat: string,
+    language: string = "ru"
+  ) => {
+    const key = `${materialId}-${channelId}-${contentFormat}`;
+    setGeneratingFormats((prev) => ({ ...prev, [key]: true }));
+    try {
+      await api.post("/adaptations/generate", {
+        material_id: materialId,
+        channel_id: channelId,
+        content_format: contentFormat,
+        language,
+      });
+      // Poll for the new adaptation after a delay
+      setTimeout(() => {
+        fetchRecommendationsAndAdaptations();
+        setGeneratingFormats((prev) => ({ ...prev, [key]: false }));
+      }, 3000);
+      // Also poll again at 8s and 15s for slower generations
+      setTimeout(() => fetchRecommendationsAndAdaptations(), 8000);
+      setTimeout(() => fetchRecommendationsAndAdaptations(), 15000);
+    } catch (e: unknown) {
+      const err = e as { response?: { status?: number } };
+      if (err?.response?.status === 409) {
+        // Already exists, just refresh
+        fetchRecommendationsAndAdaptations();
+      } else {
+        console.error(e);
+      }
+      setGeneratingFormats((prev) => ({ ...prev, [key]: false }));
     }
   };
 
@@ -913,6 +951,114 @@ export default function ProjectDetailPage() {
                             </div>
                           );
                         })}
+
+                        {/* ─── Generate additional formats ─── */}
+                        {(() => {
+                          // Group existing adaptations by channel
+                          const existingByChannel: Record<string, string[]> = {};
+                          matAdapts.forEach((ad) => {
+                            if (!existingByChannel[ad.channel_id]) existingByChannel[ad.channel_id] = [];
+                            existingByChannel[ad.channel_id].push(ad.content_format);
+                          });
+
+                          // For each channel, find formats NOT yet generated
+                          const channelIds = Object.keys(existingByChannel);
+                          const buttons: React.ReactNode[] = [];
+
+                          channelIds.forEach((chId) => {
+                            const ch = channels.find((c) => c.id === chId);
+                            if (!ch) return;
+                            const generated = existingByChannel[chId];
+                            const missing = ch.content_formats.filter((f) => !generated.includes(f));
+                            if (missing.length === 0) return;
+
+                            missing.forEach((fmt) => {
+                              const genKey = `${m.material_id || m.id}-${chId}-${fmt}`;
+                              const isGen = generatingFormats[genKey];
+                              buttons.push(
+                                <button
+                                  key={genKey}
+                                  disabled={isGen}
+                                  onClick={() =>
+                                    handleGenerateFormat(
+                                      m.material_id || m.id,
+                                      chId,
+                                      fmt,
+                                      ch.languages[0] || "ru"
+                                    )
+                                  }
+                                  style={{
+                                    padding: "6px 14px",
+                                    fontSize: "13px",
+                                    fontWeight: 500,
+                                    borderRadius: "8px",
+                                    border: `1px dashed hsl(var(--cz-accent) / 0.4)`,
+                                    backgroundColor: isGen
+                                      ? `hsl(var(--cz-accent) / 0.08)`
+                                      : "transparent",
+                                    color: `hsl(var(--cz-accent))`,
+                                    cursor: isGen ? "wait" : "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                    transition: "all 0.2s",
+                                    opacity: isGen ? 0.7 : 1,
+                                  }}
+                                  onMouseOver={(e) => {
+                                    if (!isGen) {
+                                      e.currentTarget.style.backgroundColor = `hsl(var(--cz-accent) / 0.1)`;
+                                      e.currentTarget.style.borderStyle = "solid";
+                                    }
+                                  }}
+                                  onMouseOut={(e) => {
+                                    if (!isGen) {
+                                      e.currentTarget.style.backgroundColor = "transparent";
+                                      e.currentTarget.style.borderStyle = "dashed";
+                                    }
+                                  }}
+                                >
+                                  {isGen ? (
+                                    <>⏳ Генерация...</>
+                                  ) : (
+                                    <>
+                                      <Sparkles size={14} />
+                                      {ch.name}: {formatLabels[fmt] || fmt}
+                                    </>
+                                  )}
+                                </button>
+                              );
+                            });
+                          });
+
+                          if (buttons.length === 0) return null;
+                          return (
+                            <div
+                              style={{
+                                marginTop: "8px",
+                                paddingTop: "12px",
+                                borderTop: `1px dashed hsl(var(--cz-border) / 0.3)`,
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: "8px",
+                                alignItems: "center",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: "12px",
+                                  fontWeight: 600,
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.04em",
+                                  color: `hsl(var(--cz-text-muted))`,
+                                  marginRight: "4px",
+                                }}
+                              >
+                                + ещё формат:
+                              </span>
+                              {buttons}
+                            </div>
+                          );
+                        })()}
                       </div>
                     ) : m.is_recommended ? (
                       <div
