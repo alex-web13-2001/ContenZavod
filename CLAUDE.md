@@ -51,8 +51,13 @@ ContenZavod/
 | `CHANGELOG.md` | Корень | **Каждый значимый коммит** |
 | `docs/ARCHITECTURE.md` | docs/ | При изменении архитектуры, добавлении подсистем |
 | `docs/DATABASE.md` | docs/ | При каждой миграции БД |
+| `docs/API.md` | docs/ | При добавлении/изменении API-эндпоинтов |
 | `docs/AI_PROVIDERS.md` | docs/ | При добавлении/изменении AI-провайдеров |
+| `docs/DEPLOYMENT.md` | docs/ | При изменении инфраструктуры, env-переменных |
 | `docs/adr/NNN-*.md` | docs/adr/ | При каждом значимом архитектурном решении |
+
+> **Быстрая проверка:** `make docs-check` — покажет отсутствующие и устаревшие документы.
+
 
 ### CHANGELOG.md — формат Keep a Changelog
 

@@ -1,4 +1,4 @@
-.PHONY: help up down logs build shell db-migrate db-upgrade db-downgrade db-history test lint format clean
+.PHONY: help up down logs build shell db-migrate db-upgrade db-downgrade db-history test lint format clean docs-check docs-api
 
 # Default target
 help: ## Show this help
@@ -85,3 +85,47 @@ clean: ## Remove all containers, volumes, and images
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
+
+# ── Documentation ─────────────────────────────────
+
+docs-check: ## Check documentation health (missing/outdated files)
+	@echo "\033[1m📋 Documentation Health Check\033[0m"
+	@echo "──────────────────────────────────────"
+	@ERRORS=0; \
+	for f in CLAUDE.md README.md CHANGELOG.md; do \
+		if [ -f "$$f" ]; then \
+			echo "\033[32m✅\033[0m $$f"; \
+		else \
+			echo "\033[31m❌\033[0m $$f — MISSING"; ERRORS=$$((ERRORS+1)); \
+		fi; \
+	done; \
+	for f in docs/ARCHITECTURE.md docs/DATABASE.md docs/API.md docs/AI_PROVIDERS.md docs/DEPLOYMENT.md; do \
+		if [ -f "$$f" ]; then \
+			echo "\033[32m✅\033[0m $$f"; \
+		else \
+			echo "\033[31m❌\033[0m $$f — MISSING"; ERRORS=$$((ERRORS+1)); \
+		fi; \
+	done; \
+	echo "──────────────────────────────────────"; \
+	ADR_COUNT=$$(ls docs/adr/[0-9]*.md 2>/dev/null | wc -l | tr -d ' '); \
+	echo "📝 ADR записей: $$ADR_COUNT"; \
+	CHANGELOG_UNRELEASED=$$(grep -c "^- " CHANGELOG.md 2>/dev/null || echo 0); \
+	echo "📄 CHANGELOG записей (Unreleased): $$CHANGELOG_UNRELEASED"; \
+	echo "──────────────────────────────────────"; \
+	STALE=$$(find docs/ -name "*.md" -mtime +14 2>/dev/null | head -5); \
+	if [ -n "$$STALE" ]; then \
+		echo "\033[33m⚠️  Устаревшие (>14 дней без обновлений):\033[0m"; \
+		echo "$$STALE" | while read f; do echo "   $$f (last: $$(stat -f '%Sm' -t '%Y-%m-%d' $$f))"; done; \
+	fi; \
+	if [ $$ERRORS -gt 0 ]; then \
+		echo "\033[31m\n❌ Найдено $$ERRORS отсутствующих документов\033[0m"; \
+		exit 1; \
+	else \
+		echo "\033[32m\n✅ Все обязательные документы на месте\033[0m"; \
+	fi
+
+docs-api: ## Regenerate API docs from OpenAPI spec
+	@echo "Fetching OpenAPI spec from backend..."
+	@curl -s http://localhost:8000/openapi.json | python3 -m json.tool > /tmp/openapi.json 2>/dev/null && \
+		echo "\033[32m✅ OpenAPI spec saved to /tmp/openapi.json\033[0m" || \
+		echo "\033[31m❌ Backend not running. Start with: make up\033[0m"
