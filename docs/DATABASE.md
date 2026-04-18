@@ -93,6 +93,51 @@
 | latency_ms | INTEGER | |
 | created_at | TIMESTAMPTZ | |
 
+### projects
+Тематические контент-проекты.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | UUID PK | |
+| tenant_id | UUID FK | |
+| name | VARCHAR(255) | «EcoCyprus», «TechPulse» |
+| description | TEXT | Описание проекта |
+| topic_guidelines | TEXT | Темы для AI-скоринга |
+| target_audience | TEXT | Целевая аудитория |
+| is_active | BOOLEAN | |
+| created_at | TIMESTAMPTZ | |
+
+### material_project_scores
+AI-скоринг материалов для проектов.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | UUID PK | |
+| tenant_id | UUID FK | |
+| material_id | UUID FK → raw_materials | |
+| project_id | UUID FK → projects | |
+| relevance_score | INTEGER | 0-10, релевантность теме |
+| hype_score | INTEGER | 0-10, вирусный потенциал |
+| is_recommended | BOOLEAN | true если оба >= 6 |
+| explanation | TEXT | Обоснование от AI |
+| created_at | TIMESTAMPTZ | |
+| **UK** | (material_id, project_id) | Один скор на пару |
+
+### material_channel_scores
+AI-скоринг материалов для каналов (legacy, заменён на project_scores).
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | UUID PK | |
+| tenant_id | UUID FK | |
+| material_id | UUID FK → raw_materials | |
+| channel_id | UUID FK → channels | |
+| relevance_score | INTEGER | 0-10 |
+| virality_score | INTEGER | 0-10 |
+| is_recommended | BOOLEAN | |
+| explanation | TEXT | |
+| created_at | TIMESTAMPTZ | |
+
 ### adapted_contents
 Адаптированный контент, готовый к публикации.
 
