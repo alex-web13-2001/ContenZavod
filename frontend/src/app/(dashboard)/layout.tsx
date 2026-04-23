@@ -30,22 +30,39 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { user, loading, initialized, init, logout } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
+  // Init auth
   useEffect(() => {
     if (!initialized) init();
   }, [initialized, init]);
 
+  // Redirect on logout / unauthorized
   useEffect(() => {
     if (initialized && !user && !loading) router.push("/login");
   }, [initialized, user, loading, router]);
 
+  // Listen for API 401 events → smooth redirect
+  useEffect(() => {
+    const handler = () => {
+      useAuthStore.getState().logout();
+      router.push("/login");
+    };
+    window.addEventListener("cz:auth-failure", handler);
+    return () => window.removeEventListener("cz:auth-failure", handler);
+  }, [router]);
+
   // Close mobile menu on route change
   useEffect(() => { setMobileOpen(false); }, [pathname]);
 
-  // Check mobile
+  // Mobile detection
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
-    const handler = (e: MediaQueryListEvent) => { if (e.matches) setSidebarOpen(false); };
+    const handler = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+      if (e.matches) setSidebarOpen(false);
+    };
+    setIsMobile(mq.matches);
     if (mq.matches) setSidebarOpen(false);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
@@ -53,14 +70,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (!initialized || loading) {
     return (
-      <div style={{
-        minHeight: "100dvh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: `hsl(var(--cz-bg-root))`,
-      }}>
-        <Loader2 size={32} style={{ color: `hsl(var(--cz-primary))`, animation: "spin 1s linear infinite" }} />
+      <div className="cz-flex-center" style={{ minHeight: "100dvh" }}>
+        <Loader2 size={32} className="cz-text-primary" style={{ animation: "spin 1s linear infinite" }} />
       </div>
     );
   }
@@ -74,71 +85,33 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const sidebarWidth = sidebarOpen ? "var(--cz-sidebar-width)" : "var(--cz-sidebar-collapsed)";
 
   return (
-    <div style={{ display: "flex", minHeight: "100dvh", backgroundColor: `hsl(var(--cz-bg-root))` }}>
+    <div className="cz-flex" style={{ minHeight: "100dvh" }}>
       {/* Mobile overlay */}
       {mobileOpen && (
-        <div
-          onClick={() => setMobileOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 40,
-            backgroundColor: "hsl(0 0% 0% / 0.5)",
-            backdropFilter: "blur(4px)",
-          }}
-          className="animate-fade-in"
-        />
+        <div className="cz-overlay animate-fade-in" onClick={() => setMobileOpen(false)} />
       )}
 
       {/* Sidebar */}
       <aside
-        style={{
-          width: sidebarWidth,
-          minWidth: sidebarWidth,
-          display: "flex",
-          flexDirection: "column",
-          borderRight: `1px solid hsl(var(--cz-border-subtle))`,
-          backgroundColor: `hsl(var(--cz-bg-surface) / 0.6)`,
-          backdropFilter: "blur(12px)",
-          transition: `all var(--cz-duration-base) var(--cz-ease)`,
-          position: "relative",
-          zIndex: 41,
-          ...(typeof window !== "undefined" && window.innerWidth < 769 ? {
-            position: "fixed" as const,
-            top: 0,
-            bottom: 0,
-            left: 0,
-            transform: mobileOpen ? "translateX(0)" : "translateX(-100%)",
-            width: "var(--cz-sidebar-width)",
-          } : {}),
-        }}
+        className={`cz-sidebar ${isMobile ? "cz-sidebar--desktop-only" : ""} ${mobileOpen ? "cz-sidebar--mobile-open" : ""}`}
+        style={isMobile ? undefined : { width: sidebarWidth, minWidth: sidebarWidth }}
       >
-        {/* Logo area */}
+        {/* Logo */}
         <div style={{ padding: sidebarOpen ? "24px 20px 16px" : "24px 16px 16px" }}>
-          <Link href="/" style={{ display: "flex", alignItems: "center", gap: "12px", textDecoration: "none" }}>
-            <div
-              style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "var(--cz-radius-md)",
-                background: "linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "white",
-                fontSize: "14px",
-                fontWeight: 700,
-                flexShrink: 0,
-              }}
-            >
+          <Link href="/" className="cz-flex cz-items-center cz-gap-12" style={{ textDecoration: "none" }}>
+            <div className="cz-flex-center cz-flex-shrink-0" style={{
+              width: 36, height: 36, borderRadius: "var(--cz-radius-md)",
+              background: "linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))",
+              color: "white", fontSize: 14, fontWeight: 700,
+            }}>
               CZ
             </div>
             {sidebarOpen && (
               <div style={{ overflow: "hidden" }}>
-                <div style={{ fontSize: "14px", fontWeight: 600, color: `hsl(var(--cz-text-primary))`, whiteSpace: "nowrap" }}>
+                <div className="cz-text-lg cz-font-semibold cz-text-primary" style={{ whiteSpace: "nowrap" }}>
                   ContenZavod
                 </div>
-                <div style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "160px" }}>
+                <div className="cz-text-xs cz-text-muted cz-truncate" style={{ maxWidth: 160 }}>
                   {user.tenant_name || "Проект"}
                 </div>
               </div>
@@ -146,125 +119,48 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </Link>
         </div>
 
-        {/* Collapse toggle (desktop) */}
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          style={{
-            position: "absolute",
-            right: "-12px",
-            top: "36px",
-            width: "24px",
-            height: "24px",
-            borderRadius: "50%",
-            border: `1px solid hsl(var(--cz-border))`,
-            backgroundColor: `hsl(var(--cz-bg-elevated))`,
-            color: `hsl(var(--cz-text-muted))`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            zIndex: 10,
-            transition: `all var(--cz-duration-fast) var(--cz-ease)`,
-          }}
-          className="hidden md:flex"
-        >
-          <ChevronLeft size={14} style={{ transform: sidebarOpen ? "rotate(0)" : "rotate(180deg)", transition: `transform var(--cz-duration-fast) var(--cz-ease)` }} />
-        </button>
+        {/* Collapse toggle */}
+        {!isMobile && (
+          <button className="cz-sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
+            <ChevronLeft size={14} style={{
+              transform: sidebarOpen ? "rotate(0)" : "rotate(180deg)",
+              transition: `transform var(--cz-duration-fast) var(--cz-ease)`,
+            }} />
+          </button>
+        )}
 
-        {/* Nav */}
-        <nav style={{ flex: 1, padding: "8px 12px", display: "flex", flexDirection: "column", gap: "2px" }}>
+        {/* Navigation */}
+        <nav className="cz-flex-col cz-gap-2" style={{ flex: 1, padding: "8px 12px" }}>
           {navItems.map((item) => {
             const isActive = pathname === item.href;
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                  padding: sidebarOpen ? "10px 14px" : "10px 14px",
-                  borderRadius: "var(--cz-radius-md)",
-                  fontSize: "13px",
-                  fontWeight: isActive ? 600 : 500,
-                  color: isActive ? `hsl(var(--cz-primary))` : `hsl(var(--cz-text-secondary))`,
-                  backgroundColor: isActive ? `hsl(var(--cz-primary) / 0.08)` : "transparent",
-                  textDecoration: "none",
-                  transition: `all var(--cz-duration-fast) var(--cz-ease)`,
-                  justifyContent: sidebarOpen ? "flex-start" : "center",
-                }}
-                onMouseEnter={(e) => {
-                  if (!isActive) {
-                    e.currentTarget.style.backgroundColor = `hsl(var(--cz-bg-hover))`;
-                    e.currentTarget.style.color = `hsl(var(--cz-text-primary))`;
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) {
-                    e.currentTarget.style.backgroundColor = "transparent";
-                    e.currentTarget.style.color = `hsl(var(--cz-text-secondary))`;
-                  }
-                }}
+                className={`cz-nav-link ${isActive ? "cz-nav-link--active" : ""} ${!sidebarOpen && !isMobile ? "cz-nav-link--collapsed" : ""}`}
               >
-                <item.icon size={18} style={{ flexShrink: 0 }} />
-                {sidebarOpen && <span>{item.label}</span>}
+                <item.icon size={18} className="cz-flex-shrink-0" />
+                {(sidebarOpen || isMobile) && <span>{item.label}</span>}
               </Link>
             );
           })}
         </nav>
 
         {/* User section */}
-        <div style={{ padding: "12px", borderTop: `1px solid hsl(var(--cz-border-subtle))` }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px" }}>
-            <div
-              style={{
-                width: "32px",
-                height: "32px",
-                borderRadius: "var(--cz-radius-sm)",
-                backgroundColor: `hsl(var(--cz-bg-overlay))`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "12px",
-                fontWeight: 600,
-                color: `hsl(var(--cz-text-secondary))`,
-                flexShrink: 0,
-              }}
-            >
+        <div className="cz-user-section">
+          <div className="cz-flex cz-items-center cz-gap-10" style={{ padding: 8 }}>
+            <div className="cz-icon-box cz-icon-box--sm cz-text-sm cz-font-semibold">
               {initials}
             </div>
-            {sidebarOpen && (
+            {(sidebarOpen || isMobile) && (
               <>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: "13px", fontWeight: 500, color: `hsl(var(--cz-text-primary))`, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div className="cz-flex-1" style={{ minWidth: 0 }}>
+                  <div className="cz-text-base cz-font-medium cz-truncate">
                     {user.full_name || user.email}
                   </div>
-                  <div style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))` }}>{user.role}</div>
+                  <div className="cz-text-xs cz-text-muted">{user.role}</div>
                 </div>
-                <button
-                  onClick={logout}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: "32px",
-                    height: "32px",
-                    border: "none",
-                    background: "transparent",
-                    borderRadius: "var(--cz-radius-sm)",
-                    color: `hsl(var(--cz-text-muted))`,
-                    cursor: "pointer",
-                    transition: `all var(--cz-duration-fast) var(--cz-ease)`,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = `hsl(var(--cz-error))`;
-                    e.currentTarget.style.backgroundColor = `hsl(var(--cz-error) / 0.08)`;
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = `hsl(var(--cz-text-muted))`;
-                    e.currentTarget.style.backgroundColor = "transparent";
-                  }}
-                >
+                <button className="cz-logout-btn" onClick={logout}>
                   <LogOut size={16} />
                 </button>
               </>
@@ -273,41 +169,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
 
-      {/* Main */}
+      {/* Main content */}
       <main style={{ flex: 1, minWidth: 0, overflow: "auto" }}>
         {/* Mobile header */}
-        <div
-          className="md:hidden"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "12px",
-            padding: "12px 16px",
-            borderBottom: `1px solid hsl(var(--cz-border-subtle))`,
-            backgroundColor: `hsl(var(--cz-bg-surface) / 0.6)`,
-            backdropFilter: "blur(12px)",
-            position: "sticky",
-            top: 0,
-            zIndex: 30,
-          }}
-        >
+        <div className="cz-mobile-header">
           <button
+            className="cz-flex-center"
+            style={{ width: 36, height: 36, border: "none", background: "transparent", cursor: "pointer" }}
             onClick={() => setMobileOpen(true)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "36px",
-              height: "36px",
-              border: "none",
-              background: "transparent",
-              color: `hsl(var(--cz-text-primary))`,
-              cursor: "pointer",
-            }}
           >
-            <Menu size={20} />
+            <Menu size={20} className="cz-text-primary" />
           </button>
-          <span style={{ fontSize: "15px", fontWeight: 600, color: `hsl(var(--cz-text-primary))` }}>
+          <span className="cz-text-lg cz-font-semibold cz-text-primary">
             {navItems.find((n) => n.href === pathname)?.label || "ContenZavod"}
           </span>
         </div>

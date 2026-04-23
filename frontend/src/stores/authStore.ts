@@ -42,17 +42,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   login: async (email, password) => {
-    // Login returns tokens, then we fetch user
     const tokens = await api.post<{ access_token: string }>("/auth/login", { email, password });
     localStorage.setItem("cz_token", tokens.access_token);
-    // Now fetch user with the new token
     const user = await api.get<User>("/auth/me");
     set({ user, initialized: true });
   },
 
   logout: () => {
     localStorage.removeItem("cz_token");
+    // Set user to null — layout will detect and router.push("/login")
+    // No window.location.href = full page reload!
     set({ user: null });
-    window.location.href = "/login";
   },
 }));

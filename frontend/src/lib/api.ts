@@ -1,5 +1,13 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8010/api/v1";
 
+/** Custom event for auth failures — layout listens and does router.push */
+function emitAuthFailure() {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("cz_token");
+    window.dispatchEvent(new CustomEvent("cz:auth-failure"));
+  }
+}
+
 class ApiClient {
   private getToken(): string | null {
     if (typeof window === "undefined") return null;
@@ -21,10 +29,7 @@ class ApiClient {
     });
 
     if (res.status === 401) {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("cz_token");
-        window.location.href = "/login";
-      }
+      emitAuthFailure();
       throw new Error("Не авторизован");
     }
 

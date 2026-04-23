@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { CzButton, CzInput, CzSelect, CzCard, CzBadge, CzDialog } from "@/components/ui-system";
+import { CzButton, CzInput, CzSelect, CzCard, CzBadge, CzDialog, CzPageHeader, CzEmptyState, CzSkeletonGrid } from "@/components/ui-system";
 import { Plus, Pencil, Trash2, Send, MessageCircle, Video, Globe } from "lucide-react";
 import { toast } from "sonner";
 
@@ -96,17 +96,13 @@ export default function ChannelsPage() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
-        <div>
-          <h1 style={{ fontSize: "24px", fontWeight: 700, color: `hsl(var(--cz-text-primary))`, letterSpacing: "-0.02em" }}>Каналы публикации</h1>
-          <p style={{ fontSize: "14px", color: `hsl(var(--cz-text-muted))`, marginTop: "4px" }}>Управление каналами дистрибуции</p>
-        </div>
+    <div className="cz-page">
+      <CzPageHeader title="Каналы публикации" subtitle="Управление каналами дистрибуции">
         <CzButton onClick={openNew} icon={<Plus size={16} />}>Добавить</CzButton>
-      </div>
+      </CzPageHeader>
 
       <CzDialog open={dialogOpen} onClose={() => setDialogOpen(false)} title={editingId ? "Редактировать канал" : "Новый канал"}>
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        <form onSubmit={handleSubmit} className="cz-form">
           <CzInput label="Название" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required placeholder="Название канала" />
           <CzSelect label="Тип канала" value={form.channel_type} onChange={(v) => setForm({ ...form, channel_type: v })} options={typeOptions} />
           <CzInput 
@@ -115,10 +111,8 @@ export default function ChannelsPage() {
             onChange={(e) => setForm({ ...form, target_audience: e.target.value })} 
             placeholder="Опишите, кто читает этот канал (напр. Tech entrepreneurs in Cyprus)"
           />
-          <div>
-            <label style={{ display: "block", fontSize: "13px", fontWeight: 600, color: "hsl(var(--cz-text-primary))", marginBottom: "6px" }}>
-              Редакционная политика (AI инструкции)
-            </label>
+          <div className="cz-form-group">
+            <label className="cz-form-label">Редакционная политика (AI инструкции)</label>
             <textarea 
               value={form.editorial_guidelines}
               onChange={(e) => setForm({ ...form, editorial_guidelines: e.target.value })}
@@ -126,7 +120,8 @@ export default function ChannelsPage() {
               style={{
                 width: "100%", padding: "10px", fontSize: "14px", borderRadius: "var(--cz-radius-md)",
                 border: "1px solid hsl(var(--cz-border))", minHeight: "80px", 
-                backgroundColor: "hsl(var(--cz-bg-primary))", color: "hsl(var(--cz-text-primary))"
+                backgroundColor: "hsl(var(--cz-bg-input))", color: "hsl(var(--cz-text-primary))",
+                fontFamily: "var(--cz-font-sans)", resize: "vertical",
               }}
             />
           </div>
@@ -135,54 +130,38 @@ export default function ChannelsPage() {
       </CzDialog>
 
       {loading ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "16px" }}>
-          {[1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: "140px" }} />)}
-        </div>
+        <CzSkeletonGrid count={3} />
       ) : channels.length === 0 ? (
-        <CzCard>
-          <div style={{ textAlign: "center", padding: "48px 24px" }}>
-            <Send size={48} style={{ color: `hsl(var(--cz-text-muted))`, margin: "0 auto 16px" }} />
-            <h3 style={{ fontSize: "16px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))` }}>Нет каналов</h3>
-            <p style={{ fontSize: "13px", color: `hsl(var(--cz-text-muted))`, marginTop: "6px" }}>Добавьте канал публикации</p>
-            <div style={{ marginTop: "20px" }}>
-              <CzButton onClick={openNew} icon={<Plus size={16} />}>Добавить канал</CzButton>
-            </div>
-          </div>
-        </CzCard>
+        <CzEmptyState
+          icon={<Send size={48} />}
+          title="Нет каналов"
+          text="Добавьте канал публикации"
+          action={<CzButton onClick={openNew} icon={<Plus size={16} />}>Добавить канал</CzButton>}
+        />
       ) : (
-        <div className="stagger-children" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "16px" }}>
+        <div className="cz-card-grid stagger-children">
           {channels.map((ch) => {
             const Icon = typeIcons[ch.channel_type] || Send;
             return (
               <CzCard key={ch.id} interactive>
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "12px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <div
-                      style={{
-                        width: "40px",
-                        height: "40px",
-                        borderRadius: "var(--cz-radius-md)",
-                        backgroundColor: `hsl(var(--cz-bg-overlay))`,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Icon size={20} style={{ color: `hsl(var(--cz-text-muted))` }} />
+                <div className="cz-flex-between cz-items-start" style={{ marginBottom: 12 }}>
+                  <div className="cz-flex cz-items-center cz-gap-12">
+                    <div className="cz-icon-box">
+                      <Icon size={20} />
                     </div>
                     <div>
-                      <div style={{ fontSize: "14px", fontWeight: 600, color: `hsl(var(--cz-text-primary))` }}>{ch.name}</div>
+                      <div className="cz-text-lg cz-font-semibold">{ch.name}</div>
                       <CzBadge variant={ch.is_active ? "success" : "default"}>
                         {ch.is_active ? "Активен" : "Выключен"}
                       </CzBadge>
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: "4px" }}>
+                  <div className="cz-table-actions">
                     <CzButton variant="ghost" size="sm" onClick={() => openEdit(ch)} icon={<Pencil size={14} />} />
                     <CzButton variant="ghost" size="sm" onClick={() => handleDelete(ch.id)} icon={<Trash2 size={14} />} />
                   </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px", fontSize: "12px", color: `hsl(var(--cz-text-muted))` }}>
+                <div className="cz-flex cz-items-center cz-gap-12 cz-text-sm cz-text-muted">
                   <span>{typeLabels[ch.channel_type]}</span>
                   <span>{new Date(ch.created_at).toLocaleDateString("ru")}</span>
                 </div>

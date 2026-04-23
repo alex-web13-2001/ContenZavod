@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { CzCard } from "@/components/ui-system";
+import { CzCard, CzPageHeader, CzStatusBadge } from "@/components/ui-system";
 import { Radio, FileText, Send, BarChart3 } from "lucide-react";
 
 interface DashboardStats {
@@ -18,14 +18,6 @@ const statusLabels: Record<string, string> = {
   adapted: "Адаптированы",
   published: "Опубликованы",
   rejected: "Отклонены",
-};
-
-const statusColors: Record<string, string> = {
-  new: "var(--cz-info)",
-  classified: "var(--cz-primary)",
-  adapted: "var(--cz-warning)",
-  published: "var(--cz-success)",
-  rejected: "var(--cz-error)",
 };
 
 export default function DashboardPage() {
@@ -69,87 +61,50 @@ export default function DashboardPage() {
     : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "32px" }}>
-      {/* Header */}
-      <div>
-        <h1 style={{ fontSize: "24px", fontWeight: 700, color: `hsl(var(--cz-text-primary))`, letterSpacing: "-0.02em" }}>
-          Дашборд
-        </h1>
-        <p style={{ fontSize: "14px", color: `hsl(var(--cz-text-muted))`, marginTop: "4px" }}>
-          Обзор контент-платформы
-        </p>
-      </div>
+    <div className="cz-page">
+      <CzPageHeader title="Дашборд" subtitle="Обзор контент-платформы" />
 
       {/* Stat cards */}
-      <div
-        className="stagger-children"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-          gap: "16px",
-        }}
-      >
+      <div className="cz-card-grid--stats stagger-children">
         {cards
           ? cards.map((card) => (
               <CzCard key={card.title} interactive>
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+                <div className="cz-flex-between cz-items-start">
                   <div>
-                    <p style={{ fontSize: "13px", color: `hsl(var(--cz-text-muted))`, marginBottom: "8px" }}>{card.title}</p>
-                    <p style={{ fontSize: "32px", fontWeight: 700, color: `hsl(var(--cz-text-primary))`, lineHeight: 1, letterSpacing: "-0.03em" }}>
+                    <p className="cz-text-base cz-text-muted" style={{ marginBottom: 8 }}>{card.title}</p>
+                    <p className="cz-font-bold" style={{ fontSize: 32, lineHeight: 1, letterSpacing: "-0.03em" }}>
                       {card.value}
                     </p>
-                    <p style={{ fontSize: "12px", color: `hsl(var(--cz-text-muted))`, marginTop: "6px" }}>{card.sub}</p>
+                    <p className="cz-text-sm cz-text-muted" style={{ marginTop: 6 }}>{card.sub}</p>
                   </div>
-                  <div
-                    style={{
-                      width: "44px",
-                      height: "44px",
-                      borderRadius: "var(--cz-radius-md)",
-                      background: `linear-gradient(${card.gradient})`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      opacity: 0.85,
-                      flexShrink: 0,
-                    }}
-                  >
+                  <div className="cz-flex-center cz-flex-shrink-0" style={{
+                    width: 44, height: 44, borderRadius: "var(--cz-radius-md)",
+                    background: `linear-gradient(${card.gradient})`, opacity: 0.85,
+                  }}>
                     <card.icon size={22} color="white" />
                   </div>
                 </div>
               </CzCard>
             ))
           : [1, 2, 3, 4].map((i) => (
-              <div key={i} className="skeleton" style={{ height: "120px" }} />
+              <div key={i} className="cz-skeleton cz-skeleton--card" style={{ height: 120 }} />
             ))}
       </div>
 
       {/* Pipeline */}
       {stats && stats.materials.total > 0 && (
         <CzCard>
-          <h3 style={{ fontSize: "16px", fontWeight: 600, color: `hsl(var(--cz-text-primary))`, marginBottom: "16px" }}>
+          <h3 className="cz-text-lg cz-font-semibold" style={{ marginBottom: 16 }}>
             Воронка материалов
           </h3>
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <div className="cz-flex cz-gap-12 cz-flex-wrap">
             {Object.entries(stats.materials.by_status).map(([status, count]) => (
-              <div
-                key={status}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "10px",
-                  padding: "10px 16px",
-                  borderRadius: "var(--cz-radius-md)",
-                  backgroundColor: `hsl(var(--cz-bg-elevated))`,
-                  border: `1px solid hsl(var(--cz-border-subtle))`,
-                }}
-              >
-                <span style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: `hsl(${statusColors[status] || "var(--cz-text-muted)"})` }} />
-                <span style={{ fontSize: "13px", color: `hsl(var(--cz-text-secondary))` }}>
-                  {statusLabels[status] || status}
-                </span>
-                <span style={{ fontSize: "16px", fontWeight: 600, color: `hsl(var(--cz-text-primary))` }}>
-                  {count}
-                </span>
+              <div key={status} className="cz-flex cz-items-center cz-gap-10" style={{
+                padding: "10px 16px", borderRadius: "var(--cz-radius-md)",
+                backgroundColor: "hsl(var(--cz-bg-elevated))",
+                border: "1px solid hsl(var(--cz-border-subtle))",
+              }}>
+                <CzStatusBadge status={status} label={`${statusLabels[status] || status}: ${count}`} />
               </div>
             ))}
           </div>
