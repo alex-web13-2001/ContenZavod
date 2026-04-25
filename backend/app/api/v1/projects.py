@@ -297,6 +297,8 @@ async def list_project_recommendations(
                     "channel_type": ch.channel_type if ch else "telegram",
                     "published_at": job.published_at.isoformat() if job.published_at else None,
                     "platform_post_id": job.platform_post_id,
+                    "cover_image_url": adapt.cover_image_url,
+                    "cover_status": adapt.cover_status,
                     # Stats placeholders (future)
                     "views": None,
                     "reactions": None,

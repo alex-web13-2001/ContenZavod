@@ -123,6 +123,8 @@ async def list_adaptations(
             "material_url": material.original_url if material else None,
             "channel_name": channel.name if channel else None,
             "channel_type": channel.channel_type if channel else None,
+            "cover_image_url": a.cover_image_url,
+            "cover_status": a.cover_status,
         })
 
     return {"items": items, "total": total, "page": page, "per_page": per_page}

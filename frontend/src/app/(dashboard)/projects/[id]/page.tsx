@@ -207,60 +207,77 @@ export default function ProjectDetailPage() {
   /* ────── Cover Image Generation (per adaptation) ────── */
   const handleGenerateCover = async (adaptationId: string) => {
     setGeneratingCovers((prev) => ({ ...prev, [adaptationId]: true }));
+
+    // Optimistic UI: immediately show "generating" in adaptation state
+    setAdaptations((prev) => {
+      const next = { ...prev };
+      for (const matId of Object.keys(next)) {
+        next[matId] = next[matId].map((a) =>
+          a.id === adaptationId ? { ...a, cover_status: "generating" } : a
+        );
+      }
+      return next;
+    });
+
     try {
       await api.post(`/projects/${projectId}/adaptations/${adaptationId}/generate-cover`);
       showToast("🎨 Генерация обложки запущена", "info");
 
-      let completed = false;
-
-      const pollCover = (attempt: number) => {
-        if (completed) return;
+      // Poll by directly fetching adaptations from API
+      const pollCover = async (attempt: number) => {
         if (attempt > 40) {
-          completed = true;
           setGeneratingCovers((prev) => ({ ...prev, [adaptationId]: false }));
           showToast("⏳ Генерация обложки заняла слишком долго", "error");
           return;
         }
-        setTimeout(async () => {
-          if (completed) return;
-          await fetchRecommendationsAndAdaptations({ silent: true });
 
-          // Check adaptation cover_status from adaptations state
-          let resultStatus: string | null = null;
+        await new Promise((r) => setTimeout(r, 5000));
 
-          setAdaptations((currentAdapts) => {
-            if (completed) return currentAdapts;
-            // Search through all material adaptations
-            for (const matId of Object.keys(currentAdapts)) {
-              const ad = currentAdapts[matId]?.find((a) => a.id === adaptationId);
-              if (ad?.cover_status === "ready" || ad?.cover_status === "error") {
-                if (!completed) {
-                  completed = true;
-                  resultStatus = ad.cover_status;
-                }
-                break;
-              }
+        try {
+          // Fetch fresh adaptations directly from API
+          const data = await api.get<{ items: Adaptation[] }>(
+            `/adaptations?project_id=${projectId}&per_page=200`
+          );
+          const freshAd = data.items.find((a) => a.id === adaptationId);
+
+          if (freshAd?.cover_status === "ready" || freshAd?.cover_status === "error") {
+            // Update adaptations state with fresh data
+            const grouped: Record<string, Adaptation[]> = {};
+            for (const a of data.items) {
+              if (!grouped[a.material_id]) grouped[a.material_id] = [];
+              grouped[a.material_id].push(a);
             }
-            return currentAdapts;
-          });
-
-          // Show toast OUTSIDE the state updater
-          if (resultStatus) {
+            setAdaptations(grouped);
             setGeneratingCovers((prev) => ({ ...prev, [adaptationId]: false }));
-            if (resultStatus === "ready") {
+
+            if (freshAd.cover_status === "ready") {
               showToast("✅ Обложка готова!", "success");
             } else {
               showToast("❌ Ошибка генерации обложки", "error");
             }
-          } else if (!completed) {
+          } else {
+            // Not ready yet — continue polling
             pollCover(attempt + 1);
           }
-        }, 5000);
+        } catch {
+          pollCover(attempt + 1);
+        }
       };
+
       pollCover(0);
     } catch (e) {
       console.error(e);
       setGeneratingCovers((prev) => ({ ...prev, [adaptationId]: false }));
+      // Revert optimistic update
+      setAdaptations((prev) => {
+        const next = { ...prev };
+        for (const matId of Object.keys(next)) {
+          next[matId] = next[matId].map((a) =>
+            a.id === adaptationId ? { ...a, cover_status: null } : a
+          );
+        }
+        return next;
+      });
       showToast("Ошибка запуска генерации обложки", "error");
     }
   };
