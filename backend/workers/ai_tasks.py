@@ -600,3 +600,99 @@ def generate_cover_image(self, material_id: str, tenant_id: str, language: str =
             "status": "ok",
             "cover_url": f"/api/v1/files/{object_name}",
         }
+
+
+@shared_task(
+    bind=True,
+    name="workers.ai_tasks.generate_adaptation_cover",
+    max_retries=2,
+    queue="media_queue",
+)
+def generate_adaptation_cover(self, adaptation_id: str, tenant_id: str):
+    """Generate an AI cover image for a specific adaptation.
+
+    Uses the adaptation's language and headline to generate a cover
+    with text overlay in the correct language.
+    """
+    from app.models.channel_adaptation import ChannelAdaptation
+
+    log = logger.bind(adaptation_id=adaptation_id)
+    log.info("image.adaptation.start")
+
+    with get_sync_session() as session:
+        adaptation = session.get(ChannelAdaptation, uuid.UUID(adaptation_id))
+        if not adaptation:
+            log.error("image.adaptation.not_found")
+            return {"status": "error", "reason": "not_found"}
+
+        if str(adaptation.tenant_id) != tenant_id:
+            log.error("image.adaptation.tenant_mismatch")
+            return {"status": "error", "reason": "tenant_mismatch"}
+
+        # Get material for context
+        material = session.get(RawMaterial, adaptation.material_id)
+        if not material:
+            log.error("image.adaptation.material_not_found")
+            adaptation.cover_status = "error"
+            session.commit()
+            return {"status": "error", "reason": "material_not_found"}
+
+        language = adaptation.language
+        log = log.bind(language=language)
+
+        # Prepare context from adaptation + material
+        headline = adaptation.headline or ""
+        ai_data = (material.metadata_ or {}).get("ai_classification", {})
+        summary = ai_data.get("summary_en") or ai_data.get("summary_ru") or ""
+
+        from ai.image_generator import generate_cover_image as gen_image, ImageGenerationError
+
+        try:
+            result = _run_async(gen_image(
+                headline=headline,
+                summary=summary,
+                language=language,
+                content_text=material.content_text or "",
+            ))
+        except ImageGenerationError as e:
+            log.error("image.adaptation.failed", error=str(e))
+            adaptation.cover_status = "error"
+            session.commit()
+            raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+
+        if not result or not result.get("image_url"):
+            log.error("image.adaptation.no_url")
+            adaptation.cover_status = "error"
+            session.commit()
+            return {"status": "error", "reason": "no_image_url"}
+
+        # Download image and save to MinIO
+        from app.services.storage import download_and_upload
+
+        object_name = f"covers/{adaptation_id}_{language}.png"
+        try:
+            _run_async(download_and_upload(
+                url=result["image_url"],
+                object_name=object_name,
+            ))
+        except Exception as e:
+            log.error("image.adaptation.upload_failed", error=str(e))
+            adaptation.cover_status = "error"
+            session.commit()
+            raise self.retry(exc=e, countdown=30 * (self.request.retries + 1))
+
+        # Update adaptation with cover info
+        adaptation.cover_image_url = f"/api/v1/files/{object_name}"
+        adaptation.cover_status = "ready"
+        session.commit()
+
+        log.info(
+            "image.adaptation.done",
+            object_name=object_name,
+            overlay=result.get("overlay_text", "")[:50],
+        )
+        return {
+            "status": "ok",
+            "adaptation_id": adaptation_id,
+            "cover_url": f"/api/v1/files/{object_name}",
+        }

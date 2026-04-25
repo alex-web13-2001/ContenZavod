@@ -64,8 +64,8 @@ class PublishService:
         bot_token, chat_id = self._validate_config(channel, language=adaptation.language)
         message_html = self._format_message(adaptation, bot_token)
 
-        # Check for cover image on the material
-        cover_data = self._get_cover_image(adaptation.material_id)
+        # Check for cover image: adaptation-level first, then material fallback
+        cover_data = self._get_cover_image(adaptation)
 
         if cover_data:
             result = self._send_with_photo(bot_token, chat_id, message_html, cover_data)
@@ -182,22 +182,30 @@ class PublishService:
             body=adaptation.body or "",
         )
 
-    def _get_cover_image(self, material_id) -> bytes | None:
-        """Try to load cover image from MinIO for this material.
+    def _get_cover_image(self, adaptation) -> bytes | None:
+        """Try to load cover image from MinIO.
 
+        Priority: adaptation cover → material cover (fallback).
         Returns image bytes if a cover exists, None otherwise.
         """
-        from app.models.material import RawMaterial
+        cover_url = None
 
-        material = self.session.get(RawMaterial, material_id)
-        if not material:
-            return None
+        # 1. Check adaptation-level cover first
+        if getattr(adaptation, 'cover_image_url', None) and getattr(adaptation, 'cover_status', None) == 'ready':
+            cover_url = adaptation.cover_image_url
 
-        meta = material.metadata_ or {}
-        cover_info = meta.get("cover_image", {})
-        cover_url = cover_info.get("url", "")
+        # 2. Fallback: material-level cover
+        if not cover_url:
+            from app.models.material import RawMaterial
+            material = self.session.get(RawMaterial, adaptation.material_id)
+            if material:
+                meta = material.metadata_ or {}
+                cover_info = meta.get("cover_image", {})
+                url = cover_info.get("url", "")
+                if url and meta.get("cover_status") == "ready":
+                    cover_url = url
 
-        if not cover_url or meta.get("cover_status") != "ready":
+        if not cover_url:
             return None
 
         # Extract MinIO object name from URL like /api/v1/files/covers/xxx.png

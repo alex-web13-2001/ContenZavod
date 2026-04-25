@@ -2,7 +2,7 @@
 import React from "react";
 import { ExternalLink, Sparkles, Zap, Check, X, ArrowRight, RotateCcw, Eye, Heart, MessageCircle, Image, Clock, Send } from "lucide-react";
 import { CzCard, CzBadge, CzButton } from "@/components/ui-system";
-import { Material, categoryLabels, formatLabels, renderMarkdownToHtml } from "./types";
+import { Material, Adaptation, categoryLabels, formatLabels, renderMarkdownToHtml } from "./types";
 
 /* ═══ Shared: date formatter ═══ */
 function RelativeDate({ iso }: { iso: string }) {
@@ -44,6 +44,17 @@ function ScoreBar({ score, maxScore = 10 }: { score: number; maxScore?: number }
     </div>
   );
 }
+
+/* ═══ Language flags & helpers ═══ */
+const LANG_FLAGS: Record<string, string> = {
+  ru: "🇷🇺", en: "🇬🇧", el: "🇬🇷", de: "🇩🇪", uk: "🇺🇦", es: "🇪🇸", fr: "🇫🇷", zh: "🇨🇳",
+};
+
+const LANG_LABELS: Record<string, string> = {
+  ru: "Русский", en: "English", el: "Ελληνικά", de: "Deutsch", uk: "Українська", es: "Español", fr: "Français", zh: "中文",
+};
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8010/api/v1";
 
 /* ═══ 1. INBOX CARD — clean, no adaptations ═══ */
 export function InboxCard({ m, onTake, onReject }: {
@@ -107,16 +118,204 @@ export function InboxCard({ m, onTake, onReject }: {
   );
 }
 
-/* ═══ 2. PUBLISHED CARD — shows each post per channel/language ═══ */
-const LANG_FLAGS: Record<string, string> = {
-  ru: "🇷🇺", en: "🇬🇧", el: "🇬🇷", de: "🇩🇪", uk: "🇺🇦", es: "🇪🇸", fr: "🇫🇷", zh: "🇨🇳",
-};
 
-const CHANNEL_TYPE_ICONS: Record<string, { icon: string; color: string }> = {
-  telegram: { icon: "✈️", color: "var(--cz-info)" },
-  website: { icon: "🌐", color: "var(--cz-accent)" },
-  youtube: { icon: "▶️", color: "var(--cz-error)" },
-};
+/* ═══ 2. LANGUAGE POST CARD — Telegram-style preview per language ═══ */
+
+interface LanguagePostCardProps {
+  ad: Adaptation;
+  mode: "in_progress" | "published";
+  onGenerateCover?: (adaptationId: string) => void;
+  generatingCover?: boolean;
+  onAction?: (id: string, action: "approved" | "rejected") => void;
+  stats?: { views?: number | null; reactions?: number | null; comments?: number | null };
+}
+
+export function LanguagePostCard({ ad, mode, onGenerateCover, generatingCover, onAction, stats }: LanguagePostCardProps) {
+  const flag = LANG_FLAGS[ad.language] || "🏳️";
+  const langLabel = LANG_LABELS[ad.language] || ad.language.toUpperCase();
+  const coverStatus = generatingCover ? "generating" : ad.cover_status;
+  const coverUrl = ad.cover_image_url;
+
+  // Status badge config
+  const STATUS_UI: Record<string, { bg: string; color: string; label: string; pulse?: boolean }> = {
+    draft: { bg: "hsl(var(--cz-warning) / 0.12)", color: "hsl(var(--cz-warning))", label: "Черновик" },
+    approved: { bg: "hsl(var(--cz-accent) / 0.15)", color: "hsl(var(--cz-accent))", label: "⏳ Публикуется...", pulse: true },
+    published: { bg: "hsl(var(--cz-success) / 0.12)", color: "hsl(var(--cz-success))", label: "✅ Опубликовано" },
+    rejected: { bg: "hsl(var(--cz-error) / 0.12)", color: "hsl(var(--cz-error))", label: "Отклонён" },
+  };
+  const sui = STATUS_UI[ad.status] || STATUS_UI.draft;
+
+  return (
+    <div style={{
+      borderRadius: 14, overflow: "hidden",
+      border: "1px solid hsl(var(--cz-border) / 0.5)",
+      backgroundColor: "hsl(var(--cz-bg-surface))",
+      opacity: ad.status === "rejected" ? 0.5 : 1,
+      transition: "all 0.3s ease",
+    }}>
+      {/* ── Language header bar ── */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 16px",
+        background: "linear-gradient(135deg, hsl(var(--cz-accent) / 0.06), hsl(var(--cz-bg-surface)))",
+        borderBottom: "1px solid hsl(var(--cz-border) / 0.3)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 18 }}>{flag}</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--cz-text-primary))" }}>{langLabel}</span>
+          {ad.channel_name && (
+            <span style={{ fontSize: 12, color: "hsl(var(--cz-text-muted))" }}>• {ad.channel_name}</span>
+          )}
+          <span style={{
+            padding: "2px 8px", borderRadius: 5, fontSize: 11, fontWeight: 700,
+            backgroundColor: "hsl(var(--cz-info) / 0.1)", color: "hsl(var(--cz-info))",
+          }}>
+            {formatLabels[ad.content_format] || ad.content_format}
+          </span>
+        </div>
+        <span style={{
+          padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6,
+          backgroundColor: sui.bg, color: sui.color,
+          animation: sui.pulse ? "cz-pulse 1.5s ease-in-out infinite" : undefined,
+        }}>{sui.label}</span>
+      </div>
+
+      {/* ── Cover Image area ── */}
+      {coverStatus === "ready" && coverUrl ? (
+        <div style={{ aspectRatio: "16/9", maxHeight: 220, overflow: "hidden", position: "relative" }}>
+          <img
+            src={`${API_URL}${coverUrl.startsWith("/api/v1") ? coverUrl.replace("/api/v1", "") : coverUrl}`}
+            alt={ad.headline}
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+          />
+        </div>
+      ) : coverStatus === "generating" ? (
+        <div style={{
+          aspectRatio: "16/9", maxHeight: 220,
+          backgroundColor: "hsl(var(--cz-bg-base) / 0.7)",
+          border: "none",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          animation: "cz-pulse 2s ease-in-out infinite",
+        }}>
+          <div style={{ textAlign: "center" }}>
+            <Sparkles size={24} style={{ color: "hsl(var(--cz-accent))", marginBottom: 6 }} />
+            <div style={{ fontSize: 12, fontWeight: 600, color: "hsl(var(--cz-text-muted))" }}>
+              🎨 AI генерирует обложку...
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* Placeholder with generate button */
+        <div
+          style={{
+            aspectRatio: "16/9", maxHeight: 180,
+            backgroundColor: "hsl(var(--cz-bg-base) / 0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: mode === "in_progress" && ad.status !== "rejected" ? "pointer" : "default",
+            transition: "background-color 0.2s ease",
+          }}
+          onClick={() => {
+            if (mode === "in_progress" && ad.status !== "rejected" && coverStatus !== "error") {
+              onGenerateCover?.(ad.id);
+            }
+          }}
+          onMouseEnter={(e) => {
+            if (mode === "in_progress") e.currentTarget.style.backgroundColor = "hsl(var(--cz-accent) / 0.06)";
+          }}
+          onMouseLeave={(e) => {
+            if (mode === "in_progress") e.currentTarget.style.backgroundColor = "hsl(var(--cz-bg-base) / 0.4)";
+          }}
+        >
+          <div style={{ textAlign: "center" }}>
+            <Image size={28} style={{ color: "hsl(var(--cz-text-muted))", marginBottom: 6, opacity: 0.4 }} />
+            {coverStatus === "error" ? (
+              <button
+                onClick={(e) => { e.stopPropagation(); onGenerateCover?.(ad.id); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5, padding: "6px 14px", borderRadius: 7,
+                  border: "1px solid hsl(var(--cz-error) / 0.5)", cursor: "pointer", fontSize: 12,
+                  fontWeight: 700, backgroundColor: "hsl(var(--cz-error) / 0.08)", color: "hsl(var(--cz-error))",
+                }}
+              >
+                <X size={12} /> Ошибка — повторить
+              </button>
+            ) : mode === "in_progress" && ad.status !== "rejected" ? (
+              <div style={{ fontSize: 12, fontWeight: 600, color: "hsl(var(--cz-accent))", opacity: 0.7 }}>
+                🎨 Сгенерировать обложку
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: "hsl(var(--cz-text-muted))", opacity: 0.4 }}>
+                Нет обложки
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Post content: headline + body ── */}
+      <div style={{ padding: "14px 16px" }}>
+        {ad.headline && (
+          <div style={{
+            fontSize: 15, fontWeight: 700, lineHeight: 1.35,
+            color: "hsl(var(--cz-text-primary))", marginBottom: 8,
+          }}>
+            {ad.headline}
+          </div>
+        )}
+        {ad.body && (
+          <div
+            style={{
+              fontSize: 13, lineHeight: 1.6,
+              color: "hsl(var(--cz-text-secondary))",
+              maxHeight: 140, overflowY: "auto",
+            }}
+            dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(ad.body) }}
+          />
+        )}
+      </div>
+
+      {/* ── Action / Stats footer ── */}
+      {mode === "in_progress" && ad.status === "draft" && onAction && (
+        <div style={{
+          display: "flex", justifyContent: "flex-end", gap: 8,
+          padding: "8px 16px 12px",
+          borderTop: "1px solid hsl(var(--cz-border) / 0.2)",
+        }}>
+          <button onClick={() => onAction(ad.id, "rejected")} style={{
+            display: "flex", alignItems: "center", gap: 4, padding: "5px 12px", borderRadius: 7,
+            border: "1px solid hsl(var(--cz-border) / 0.5)", cursor: "pointer", fontSize: 12, fontWeight: 600,
+            backgroundColor: "transparent", color: "hsl(var(--cz-text-muted))",
+          }}><X size={12} /> Отклонить</button>
+        </div>
+      )}
+
+      {mode === "published" && stats && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 16,
+          padding: "8px 16px 12px",
+          borderTop: "1px solid hsl(var(--cz-border) / 0.2)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "hsl(var(--cz-text-muted))" }}>
+            <Eye size={14} />
+            <span style={{ fontWeight: 600 }}>{stats.views ?? "—"}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "hsl(var(--cz-text-muted))" }}>
+            <Heart size={14} />
+            <span style={{ fontWeight: 600 }}>{stats.reactions ?? "—"}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "hsl(var(--cz-text-muted))" }}>
+            <MessageCircle size={14} />
+            <span style={{ fontWeight: 600 }}>{stats.comments ?? "—"}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ═══ 3. PUBLISHED CARD — news header + language post cards ═══ */
 
 interface PublishedPost {
   adaptation_id: string;
@@ -131,99 +330,8 @@ interface PublishedPost {
   views: number | null;
   reactions: number | null;
   comments: number | null;
-}
-
-/** Individual Telegram-style post preview */
-function PostCard({ post }: { post: PublishedPost }) {
-  const chType = CHANNEL_TYPE_ICONS[post.channel_type] || CHANNEL_TYPE_ICONS.telegram;
-  const pubTime = post.published_at
-    ? new Date(post.published_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })
-    : null;
-
-  return (
-    <div style={{
-      borderRadius: 12,
-      overflow: "hidden",
-      border: "1px solid hsl(var(--cz-border) / 0.4)",
-      backgroundColor: "hsl(var(--cz-bg-base) / 0.5)",
-    }}>
-      {/* Channel header bar */}
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "10px 16px",
-        background: `linear-gradient(135deg, hsl(${chType.color} / 0.08), hsl(${chType.color} / 0.03))`,
-        borderBottom: "1px solid hsl(var(--cz-border) / 0.3)",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 16 }}>{chType.icon}</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--cz-text-primary))" }}>
-            {post.channel_name || "Канал"}
-          </span>
-          <span style={{
-            display: "inline-flex", alignItems: "center", gap: 4,
-            padding: "2px 8px", borderRadius: 5, fontSize: 12, fontWeight: 700,
-            backgroundColor: `hsl(${chType.color} / 0.12)`,
-            color: `hsl(${chType.color})`,
-          }}>
-            {LANG_FLAGS[post.lang] || "🏳️"} {post.lang.toUpperCase()}
-          </span>
-          {post.format && (
-            <span style={{
-              display: "inline-flex", alignItems: "center",
-              padding: "2px 8px", borderRadius: 5, fontSize: 11, fontWeight: 600,
-              backgroundColor: "hsl(var(--cz-accent) / 0.1)",
-              color: "hsl(var(--cz-accent))",
-              textTransform: "uppercase", letterSpacing: "0.03em",
-            }}>
-              {formatLabels[post.format] || post.format}
-            </span>
-          )}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {pubTime && (
-            <span style={{ fontSize: 11, color: "hsl(var(--cz-text-muted))" }}>
-              {pubTime}
-            </span>
-          )}
-          {post.platform_post_id && (
-            <span style={{ fontSize: 10, color: "hsl(var(--cz-text-muted))", fontFamily: "monospace" }}>
-              #{post.platform_post_id}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Post body — Telegram style */}
-      {post.body && (
-        <div style={{
-          padding: "14px 16px",
-          fontSize: 14, lineHeight: 1.65,
-          color: "hsl(var(--cz-text-secondary))",
-          maxHeight: 250, overflowY: "auto",
-        }} dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(post.body) }} />
-      )}
-
-      {/* Stats footer */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 16,
-        padding: "8px 16px",
-        borderTop: "1px solid hsl(var(--cz-border) / 0.2)",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "hsl(var(--cz-text-muted))" }}>
-          <Eye size={14} />
-          <span style={{ fontWeight: 600 }}>{post.views ?? "—"}</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "hsl(var(--cz-text-muted))" }}>
-          <Heart size={14} />
-          <span style={{ fontWeight: 600 }}>{post.reactions ?? "—"}</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "hsl(var(--cz-text-muted))" }}>
-          <MessageCircle size={14} />
-          <span style={{ fontWeight: 600 }}>{post.comments ?? "—"}</span>
-        </div>
-      </div>
-    </div>
-  );
+  cover_image_url?: string | null;
+  cover_status?: string | null;
 }
 
 export function PublishedCard({ m }: { m: Material }) {
@@ -257,23 +365,50 @@ export function PublishedCard({ m }: { m: Material }) {
 
       {/* Individual post cards */}
       {posts.length > 0 ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {posts.map((post, i) => (
-            <PostCard key={post.adaptation_id || i} post={post} />
-          ))}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
+          {posts.map((post, i) => {
+            // Convert published post to Adaptation-like object for LanguagePostCard
+            const fakeAd: Adaptation = {
+              id: post.adaptation_id || `post-${i}`,
+              material_id: m.material_id || m.id,
+              channel_id: "",
+              language: post.lang,
+              content_format: post.format,
+              headline: post.headline,
+              body: post.body,
+              priority: "normal",
+              status: "published",
+              created_at: post.published_at || m.created_at,
+              material_title: m.material_title,
+              channel_name: post.channel_name,
+              channel_type: post.channel_type,
+              cover_image_url: post.cover_image_url || null,
+              cover_status: post.cover_status || null,
+            };
+            return (
+              <LanguagePostCard
+                key={post.adaptation_id || i}
+                ad={fakeAd}
+                mode="published"
+                stats={{
+                  views: post.views,
+                  reactions: post.reactions,
+                  comments: post.comments,
+                }}
+              />
+            );
+          })}
         </div>
       ) : (
         <p style={{ margin: 0, fontSize: 14, color: "hsl(var(--cz-text-muted))" }}>
           {m.summary_ru || "Пост опубликован"}
         </p>
       )}
-
-      {/* TODO: Adapt button — add more language versions */}
     </CzCard>
   );
 }
 
-/* ═══ 3. REJECTED CARD — minimal ═══ */
+/* ═══ 4. REJECTED CARD — minimal ═══ */
 export function RejectedCard({ m, onRestore }: { m: Material; onRestore: (id: string) => void }) {
   const d = new Date(m.created_at).toLocaleDateString("ru", { day: "numeric", month: "short" });
   const cat = m.category ? categoryLabels[m.category] : null;
@@ -305,55 +440,15 @@ export function RejectedCard({ m, onRestore }: { m: Material; onRestore: (id: st
   );
 }
 
-/* ═══ 4. IN_PROGRESS CARD header ═══ */
-export function InProgressCardHeader({ m, onGenerateCover, generatingCover }: {
+/* ═══ 5. IN_PROGRESS CARD header — news meta only (no cover here) ═══ */
+export function InProgressCardHeader({ m }: {
   m: Material;
-  onGenerateCover?: (materialId: string) => void;
-  generatingCover?: boolean;
 }) {
   const cat = m.category ? categoryLabels[m.category] : null;
   const title = resolveTitle(m);
-  const coverUrl = m.cover_image_url;
-  const coverStatus = generatingCover ? "generating" : m.cover_status;
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8010/api/v1";
 
   return (
     <>
-      {/* Cover image preview */}
-      {coverUrl && coverStatus === "ready" && (
-        <div style={{
-          marginBottom: 14, borderRadius: 12, overflow: "hidden",
-          position: "relative", aspectRatio: "16/9", maxHeight: 260,
-          backgroundColor: "hsl(var(--cz-bg-surface))",
-        }}>
-          <img
-            src={`${API_URL}${coverUrl.startsWith("/api/v1") ? coverUrl.replace("/api/v1", "") : coverUrl}`}
-            alt={title}
-            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-          />
-        </div>
-      )}
-
-      {/* Generating skeleton */}
-      {coverStatus === "generating" && (
-        <div style={{
-          marginBottom: 14, borderRadius: 12, overflow: "hidden",
-          aspectRatio: "16/9", maxHeight: 260,
-          backgroundColor: "hsl(var(--cz-bg-surface))",
-          border: "1px dashed hsl(var(--cz-accent) / 0.4)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          animation: "cz-pulse 2s ease-in-out infinite",
-        }}>
-          <div style={{ textAlign: "center" }}>
-            <Sparkles size={28} style={{ color: "hsl(var(--cz-accent))", marginBottom: 8 }} />
-            <div style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--cz-text-muted))" }}>
-              🎨 AI генерирует обложку...
-            </div>
-          </div>
-        </div>
-      )}
-
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <RelativeDate iso={m.created_at} />
@@ -370,56 +465,6 @@ export function InProgressCardHeader({ m, onGenerateCover, generatingCover }: {
         <a href={m.material_url || "#"} target="_blank" rel="noopener noreferrer" className="cz-link-pill" style={{ fontSize: 12 }}>
           <ExternalLink size={12} /> Источник
         </a>
-        {/* Cover image button — depends on state */}
-        {coverStatus === "ready" ? (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7,
-            backgroundColor: "hsl(var(--cz-success) / 0.12)", color: "hsl(var(--cz-success))",
-            fontSize: 11, fontWeight: 700,
-          }}>
-            <Check size={12} /> Обложка готова
-          </div>
-        ) : coverStatus === "generating" ? (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7,
-            backgroundColor: "hsl(var(--cz-accent) / 0.12)", color: "hsl(var(--cz-accent))",
-            fontSize: 11, fontWeight: 700, animation: "cz-pulse 2s ease-in-out infinite",
-          }}>
-            <Sparkles size={12} /> Генерируем...
-          </div>
-        ) : coverStatus === "error" ? (
-          <button
-            onClick={() => onGenerateCover?.(m.material_id || m.id)}
-            style={{
-              display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7,
-              border: "1px solid hsl(var(--cz-error) / 0.5)", cursor: "pointer", fontSize: 11,
-              fontWeight: 700, backgroundColor: "hsl(var(--cz-error) / 0.08)",
-              color: "hsl(var(--cz-error))",
-            }}
-          >
-            <X size={12} /> Ошибка — повторить
-          </button>
-        ) : (
-          <button
-            onClick={() => onGenerateCover?.(m.material_id || m.id)}
-            style={{
-              display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7,
-              border: "1px dashed hsl(var(--cz-accent) / 0.5)", cursor: "pointer", fontSize: 11,
-              fontWeight: 700, backgroundColor: "transparent", color: "hsl(var(--cz-accent))",
-              transition: "all 0.2s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "hsl(var(--cz-accent) / 0.1)";
-              e.currentTarget.style.borderColor = "hsl(var(--cz-accent))";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = "transparent";
-              e.currentTarget.style.borderColor = "hsl(var(--cz-accent) / 0.5)";
-            }}
-          >
-            <Image size={13} /> 🎨 Сгенерировать обложку
-          </button>
-        )}
         <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7, border: "1px dashed hsl(var(--cz-border) / 0.5)", color: "hsl(var(--cz-text-muted))", fontSize: 11 }}>
           <Clock size={13} /> Расписание
         </div>
@@ -427,4 +472,3 @@ export function InProgressCardHeader({ m, onGenerateCover, generatingCover }: {
     </>
   );
 }
-

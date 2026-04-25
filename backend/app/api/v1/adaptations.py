@@ -38,6 +38,8 @@ class AdaptationResponse(BaseModel):
     material_url: str | None = None
     channel_name: str | None = None
     channel_type: str | None = None
+    cover_image_url: str | None = None
+    cover_status: str | None = None
 
     model_config = {"from_attributes": True}
 

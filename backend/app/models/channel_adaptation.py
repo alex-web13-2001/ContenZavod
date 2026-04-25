@@ -62,6 +62,14 @@ class ChannelAdaptation(Base, TenantMixin, TimestampMixin):
         String(20), server_default="draft", nullable=False
     )
 
+    # Per-language cover image
+    cover_image_url: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )  # MinIO path e.g. /api/v1/files/covers/uuid.png
+    cover_status: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # null | generating | ready | error
+
     # Relationships
     material = relationship("RawMaterial", backref="channel_adaptations")
     channel = relationship("Channel", backref="adaptations")

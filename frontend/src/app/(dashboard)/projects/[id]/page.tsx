@@ -204,11 +204,11 @@ export default function ProjectDetailPage() {
     }
   };
 
-  /* ────── Cover Image Generation ────── */
-  const handleGenerateCover = async (materialId: string) => {
-    setGeneratingCovers((prev) => ({ ...prev, [materialId]: true }));
+  /* ────── Cover Image Generation (per adaptation) ────── */
+  const handleGenerateCover = async (adaptationId: string) => {
+    setGeneratingCovers((prev) => ({ ...prev, [adaptationId]: true }));
     try {
-      await api.post(`/projects/${projectId}/materials/${materialId}/generate-cover?language=ru`);
+      await api.post(`/projects/${projectId}/adaptations/${adaptationId}/generate-cover`);
       showToast("🎨 Генерация обложки запущена", "info");
 
       let completed = false;
@@ -217,7 +217,7 @@ export default function ProjectDetailPage() {
         if (completed) return;
         if (attempt > 40) {
           completed = true;
-          setGeneratingCovers((prev) => ({ ...prev, [materialId]: false }));
+          setGeneratingCovers((prev) => ({ ...prev, [adaptationId]: false }));
           showToast("⏳ Генерация обложки заняла слишком долго", "error");
           return;
         }
@@ -225,24 +225,28 @@ export default function ProjectDetailPage() {
           if (completed) return;
           await fetchRecommendationsAndAdaptations({ silent: true });
 
-          // Read state via updater but DON'T call showToast inside it
+          // Check adaptation cover_status from adaptations state
           let resultStatus: string | null = null;
 
-          setMaterials((currentMaterials) => {
-            if (completed) return currentMaterials;
-            const mat = currentMaterials.find((m) => (m.material_id || m.id) === materialId);
-            if (mat?.cover_status === "ready" || mat?.cover_status === "error") {
-              if (!completed) {
-                completed = true;
-                resultStatus = mat.cover_status;
+          setAdaptations((currentAdapts) => {
+            if (completed) return currentAdapts;
+            // Search through all material adaptations
+            for (const matId of Object.keys(currentAdapts)) {
+              const ad = currentAdapts[matId]?.find((a) => a.id === adaptationId);
+              if (ad?.cover_status === "ready" || ad?.cover_status === "error") {
+                if (!completed) {
+                  completed = true;
+                  resultStatus = ad.cover_status;
+                }
+                break;
               }
             }
-            return currentMaterials;
+            return currentAdapts;
           });
 
           // Show toast OUTSIDE the state updater
           if (resultStatus) {
-            setGeneratingCovers((prev) => ({ ...prev, [materialId]: false }));
+            setGeneratingCovers((prev) => ({ ...prev, [adaptationId]: false }));
             if (resultStatus === "ready") {
               showToast("✅ Обложка готова!", "success");
             } else {
@@ -256,7 +260,7 @@ export default function ProjectDetailPage() {
       pollCover(0);
     } catch (e) {
       console.error(e);
-      setGeneratingCovers((prev) => ({ ...prev, [materialId]: false }));
+      setGeneratingCovers((prev) => ({ ...prev, [adaptationId]: false }));
       showToast("Ошибка запуска генерации обложки", "error");
     }
   };

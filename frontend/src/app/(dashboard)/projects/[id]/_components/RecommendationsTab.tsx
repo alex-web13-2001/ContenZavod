@@ -5,7 +5,7 @@ import { CzCard, CzBadge, CzButton, CzEmptyState, CzSkeletonTable, CzChip, CzChi
 import { Sparkles, Zap, ExternalLink, Check, X, Inbox, PenTool, CheckCircle2, Archive, Send } from "lucide-react";
 import { Material, Adaptation, Channel, PipelineCounts, categoryLabels, formatLabels, renderMarkdownToHtml } from "./types";
 import { PipelineNav, type PipelineStatus } from "./PipelineNav";
-import { InboxCard, PublishedCard, RejectedCard, InProgressCardHeader } from "./PipelineCards";
+import { InboxCard, PublishedCard, RejectedCard, InProgressCardHeader, LanguagePostCard } from "./PipelineCards";
 import { PublishDialog } from "./PublishDialog";
 
 const LANG_OPTIONS: { code: string; flag: string; label: string }[] = [
@@ -14,88 +14,6 @@ const LANG_OPTIONS: { code: string; flag: string; label: string }[] = [
   { code: "uk", flag: "🇺🇦", label: "UA" }, { code: "es", flag: "🇪🇸", label: "ES" },
   { code: "fr", flag: "🇫🇷", label: "FR" }, { code: "zh", flag: "🇨🇳", label: "ZH" },
 ];
-
-/* ────────── AdaptationCard (reused in "in_progress") ────────── */
-function AdaptationCard({
-  ad, expandedId, onToggleExpand, onAction,
-}: {
-  ad: Adaptation; expandedId: string | null;
-  onToggleExpand: (id: string | null) => void;
-  onAction: (id: string, action: "approved" | "rejected") => void;
-}) {
-  const isExpanded = expandedId === ad.id;
-
-  /* Status badge config */
-  const STATUS_UI: Record<string, { bg: string; color: string; label: string; pulse?: boolean }> = {
-    draft: { bg: "hsl(var(--cz-warning) / 0.12)", color: "hsl(var(--cz-warning))", label: "Черновик" },
-    approved: { bg: "hsl(var(--cz-accent) / 0.15)", color: "hsl(var(--cz-accent))", label: "⏳ Публикуется...", pulse: true },
-    published: { bg: "hsl(var(--cz-success) / 0.12)", color: "hsl(var(--cz-success))", label: "✅ Опубликовано" },
-    rejected: { bg: "hsl(var(--cz-error) / 0.12)", color: "hsl(var(--cz-error))", label: "Отклонён" },
-  };
-  const sui = STATUS_UI[ad.status] || STATUS_UI.draft;
-
-  return (
-    <div className="cz-card-inner" style={{
-      padding: "16px 20px", borderRadius: 12,
-      backgroundColor: "hsl(var(--cz-bg-surface))", border: "1px solid hsl(var(--cz-border))",
-      opacity: ad.status === "rejected" ? 0.5 : 1,
-      transition: "opacity 0.3s ease",
-    }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>{ad.channel_name || "Канал"}</span>
-          <CzBadge variant="info">{formatLabels[ad.content_format] || ad.content_format}</CzBadge>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>
-            {LANG_OPTIONS.find(l => l.code === ad.language)?.flag} {ad.language.toUpperCase()}
-          </span>
-          <span style={{
-            padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 6,
-            backgroundColor: sui.bg, color: sui.color,
-            animation: sui.pulse ? "cz-pulse 1.5s ease-in-out infinite" : undefined,
-          }}>{sui.label}</span>
-        </div>
-        <button onClick={() => onToggleExpand(isExpanded ? null : ad.id)} style={{
-          background: "none", border: "none", cursor: "pointer", fontSize: 12,
-          color: "hsl(var(--cz-text-muted))", padding: "4px 8px", borderRadius: 4,
-        }}>{isExpanded ? "▲ Свернуть" : "▼ Развернуть"}</button>
-      </div>
-
-      {isExpanded && (
-        <>
-          {ad.headline && <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6, color: "hsl(var(--cz-text-primary))" }}>{ad.headline}</div>}
-          <div style={{
-            fontSize: 14, lineHeight: 1.65, color: "hsl(var(--cz-text-secondary))",
-            maxHeight: 320, overflowY: "auto", paddingRight: 8,
-          }} dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(ad.body) }} />
-          {ad.status === "draft" && (
-            <div style={{ display: "flex", gap: 10, marginTop: 12, justifyContent: "flex-end", alignItems: "center" }}>
-              <button onClick={() => onAction(ad.id, "rejected")} style={{
-                display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 7,
-                border: "1px solid hsl(var(--cz-border) / 0.5)", cursor: "pointer", fontSize: 13, fontWeight: 600,
-                backgroundColor: "transparent", color: "hsl(var(--cz-text-muted))",
-              }}><X size={14} /> Отклонить</button>
-              <button onClick={() => onAction(ad.id, "approved")} style={{
-                display: "flex", alignItems: "center", gap: 5, padding: "7px 16px", borderRadius: 7,
-                border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,
-                backgroundColor: "hsl(var(--cz-success))", color: "white",
-              }}><Check size={14} /> Одобрить и опубликовать</button>
-            </div>
-          )}
-          {ad.status === "approved" && (
-            <div style={{ marginTop: 12, padding: "8px 14px", borderRadius: 8, backgroundColor: "hsl(var(--cz-accent) / 0.08)", fontSize: 13, color: "hsl(var(--cz-accent))", fontWeight: 600, textAlign: "center" }}>
-              ⏳ Отправляется в канал...
-            </div>
-          )}
-          {ad.status === "published" && (
-            <div style={{ marginTop: 12, padding: "8px 14px", borderRadius: 8, backgroundColor: "hsl(var(--cz-success) / 0.08)", fontSize: 13, color: "hsl(var(--cz-success))", fontWeight: 600, textAlign: "center" }}>
-              ✅ Успешно опубликовано в канал
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
 
 /* ────────── Empty state config ────────── */
 const EMPTY_STATES: Record<PipelineStatus, { icon: React.ReactNode; title: string; text: string }> = {
@@ -131,7 +49,7 @@ interface RecommendationsTabProps {
   onClosePublishDialog: () => void;
   onBatchPublish: (scoreId: string, adaptationIds: string[]) => void;
   publishingBatch?: boolean;
-  onGenerateCover?: (materialId: string) => void;
+  onGenerateCover?: (adaptationId: string) => void;
   generatingCovers?: Record<string, boolean>;
 }
 
@@ -145,7 +63,6 @@ export function RecommendationsTab({
   publishDialogScoreId, onOpenPublishDialog, onClosePublishDialog, onBatchPublish, publishingBatch,
   onGenerateCover, generatingCovers,
 }: RecommendationsTabProps) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const empty = EMPTY_STATES[pipelineStatus];
 
   return (
@@ -212,7 +129,7 @@ export function RecommendationsTab({
                 onRestore={(id) => onPipelineAction(id, "inbox")} /></div>;
             }
 
-            /* ── IN_PROGRESS — full card with adaptations ── */
+            /* ── IN_PROGRESS — news header + language post cards ── */
             const materialId = m.material_id || m.id;
             const matAdapts = adaptations[materialId] || [];
             const generatingItems: { key: string; channelId: string; format: string; lang: string; channelName: string }[] = [];
@@ -229,39 +146,49 @@ export function RecommendationsTab({
             return (
               <div key={m.id} className={isExiting ? "cz-card-exiting" : ""}>
               <CzCard padding="lg">
-                <InProgressCardHeader m={m} onGenerateCover={onGenerateCover} generatingCover={generatingCovers?.[m.material_id || m.id]} />
+                <InProgressCardHeader m={m} />
 
-                {/* Adaptations block */}
-                <div style={{ padding: 16, borderRadius: 12, backgroundColor: "hsl(var(--cz-bg-base) / 0.5)", border: "1px solid hsl(var(--cz-border) / 0.5)" }}>
+                {/* Language post cards grid */}
+                <div style={{ marginBottom: 16 }}>
                   <div style={{ marginBottom: 12, fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "hsl(var(--cz-text-muted))" }}>
-                    ✍️ Каналы и адаптации {totalCount > 0 && `(${totalCount})`}
+                    ✍️ Языковые версии {totalCount > 0 && `(${totalCount})`}
                   </div>
 
                   {totalCount > 0 ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
                       {matAdapts.map((ad) => (
-                        <AdaptationCard key={ad.id} ad={ad} expandedId={expandedId}
-                          onToggleExpand={setExpandedId} onAction={onAdaptationAction} />
+                        <LanguagePostCard
+                          key={ad.id}
+                          ad={ad}
+                          mode="in_progress"
+                          onGenerateCover={onGenerateCover}
+                          generatingCover={generatingCovers?.[ad.id]}
+                          onAction={onAdaptationAction}
+                        />
                       ))}
                       {/* Skeleton cards for generating */}
                       {generatingItems.map((gi) => {
                         const langOpt = LANG_OPTIONS.find((l) => l.code === gi.lang);
                         return (
                           <div key={gi.key} style={{
-                            padding: "14px 18px", borderRadius: 10,
-                            backgroundColor: "hsl(var(--cz-bg-surface))",
+                            borderRadius: 14, overflow: "hidden",
                             border: "1px dashed hsl(var(--cz-accent) / 0.4)",
+                            backgroundColor: "hsl(var(--cz-bg-surface))",
                             animation: "cz-pulse 2s ease-in-out infinite",
                           }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                              <span style={{ fontSize: 14, fontWeight: 600 }}>{gi.channelName}</span>
+                            <div style={{
+                              display: "flex", alignItems: "center", gap: 10,
+                              padding: "10px 16px",
+                              borderBottom: "1px solid hsl(var(--cz-border) / 0.3)",
+                            }}>
+                              <span style={{ fontSize: 18 }}>{langOpt?.flag || "🏳️"}</span>
+                              <span style={{ fontSize: 14, fontWeight: 700 }}>{gi.channelName}</span>
                               <CzBadge variant="info">{formatLabels[gi.format] || gi.format}</CzBadge>
-                              <span style={{ fontSize: 13, fontWeight: 600 }}>{langOpt?.flag} {gi.lang.toUpperCase()}</span>
                               <span style={{ padding: "3px 10px", fontSize: 11, fontWeight: 700, borderRadius: 5, backgroundColor: "hsl(var(--cz-accent) / 0.12)", color: "hsl(var(--cz-accent))" }}>⏳ AI генерирует...</span>
                             </div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                              <div style={{ height: 16, width: "70%", borderRadius: 5, backgroundColor: "hsl(var(--cz-border) / 0.4)" }} />
-                              <div style={{ height: 12, width: "100%", borderRadius: 4, backgroundColor: "hsl(var(--cz-border) / 0.25)" }} />
+                            <div style={{ padding: 16 }}>
+                              <div style={{ height: 16, width: "70%", borderRadius: 5, backgroundColor: "hsl(var(--cz-border) / 0.4)", marginBottom: 8 }} />
+                              <div style={{ height: 12, width: "100%", borderRadius: 4, backgroundColor: "hsl(var(--cz-border) / 0.25)", marginBottom: 6 }} />
                               <div style={{ height: 12, width: "85%", borderRadius: 4, backgroundColor: "hsl(var(--cz-border) / 0.2)" }} />
                             </div>
                           </div>
@@ -338,7 +265,7 @@ export function RecommendationsTab({
                 {hasDrafts && (
                   <div style={{
                     display: "flex", justifyContent: "flex-end", alignItems: "center",
-                    marginTop: 16, paddingTop: 16, gap: 12,
+                    marginTop: 4, paddingTop: 16, gap: 12,
                     borderTop: "1px solid hsl(var(--cz-border) / 0.2)",
                   }}>
                     <CzButton variant="ghost" size="sm"

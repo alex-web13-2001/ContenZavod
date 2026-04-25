@@ -74,6 +74,8 @@ export interface Adaptation {
   material_title: string | null;
   channel_name: string | null;
   channel_type: string | null;
+  cover_image_url: string | null;
+  cover_status: string | null;
 }
 
 export const platformConfig: Record<string, { icon: typeof Send; label: string; color: string }> = {

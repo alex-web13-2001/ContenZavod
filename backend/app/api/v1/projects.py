@@ -585,3 +585,51 @@ async def generate_material_cover(
         "material_id": material_id,
     }
 
+
+@router.post("/{project_id}/adaptations/{adaptation_id}/generate-cover", status_code=202)
+async def generate_adaptation_cover(
+    project_id: str,
+    adaptation_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _user: str = Depends(get_current_user_id),
+):
+    """Generate an AI cover image for a specific channel adaptation.
+
+    Creates a cover with text overlay in the adaptation's language,
+    matching the adaptation's headline and content.
+    """
+    import uuid as _uuid
+    from sqlalchemy import select
+    from app.models.channel_adaptation import ChannelAdaptation
+
+    tid = _uuid.UUID(tenant_id)
+
+    adaptation = (await db.execute(
+        select(ChannelAdaptation).where(
+            ChannelAdaptation.id == _uuid.UUID(adaptation_id),
+            ChannelAdaptation.tenant_id == tid,
+        )
+    )).scalar_one_or_none()
+
+    if not adaptation:
+        raise HTTPException(status_code=404, detail="Адаптация не найдена")
+
+    # Mark as generating
+    adaptation.cover_status = "generating"
+    await db.commit()
+
+    # Launch Celery task
+    from workers.ai_tasks import generate_adaptation_cover as gen_task
+
+    task = gen_task.delay(
+        adaptation_id=adaptation_id,
+        tenant_id=tenant_id,
+    )
+
+    return {
+        "status": "generating",
+        "task_id": task.id,
+        "adaptation_id": adaptation_id,
+        "language": adaptation.language,
+    }
