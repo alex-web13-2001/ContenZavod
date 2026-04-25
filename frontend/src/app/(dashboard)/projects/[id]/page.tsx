@@ -211,7 +211,6 @@ export default function ProjectDetailPage() {
       await api.post(`/projects/${projectId}/materials/${materialId}/generate-cover?language=ru`);
       showToast("🎨 Генерация обложки запущена", "info");
 
-      // Guard against duplicate toasts
       let completed = false;
 
       const pollCover = (attempt: number) => {
@@ -225,25 +224,33 @@ export default function ProjectDetailPage() {
         setTimeout(async () => {
           if (completed) return;
           await fetchRecommendationsAndAdaptations({ silent: true });
-          // Read current state to check cover status
+
+          // Read state via updater but DON'T call showToast inside it
+          let resultStatus: string | null = null;
+
           setMaterials((currentMaterials) => {
             if (completed) return currentMaterials;
             const mat = currentMaterials.find((m) => (m.material_id || m.id) === materialId);
             if (mat?.cover_status === "ready" || mat?.cover_status === "error") {
               if (!completed) {
                 completed = true;
-                setGeneratingCovers((prev) => ({ ...prev, [materialId]: false }));
-                if (mat.cover_status === "ready") {
-                  showToast("✅ Обложка готова!", "success");
-                } else {
-                  showToast("❌ Ошибка генерации обложки", "error");
-                }
+                resultStatus = mat.cover_status;
               }
-            } else {
-              pollCover(attempt + 1);
             }
             return currentMaterials;
           });
+
+          // Show toast OUTSIDE the state updater
+          if (resultStatus) {
+            setGeneratingCovers((prev) => ({ ...prev, [materialId]: false }));
+            if (resultStatus === "ready") {
+              showToast("✅ Обложка готова!", "success");
+            } else {
+              showToast("❌ Ошибка генерации обложки", "error");
+            }
+          } else if (!completed) {
+            pollCover(attempt + 1);
+          }
         }, 5000);
       };
       pollCover(0);
