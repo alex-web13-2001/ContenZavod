@@ -395,6 +395,24 @@ def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_
                     )
                     continue
 
+    # If nothing was adapted, revert material status back to inbox
+    # so the user can see it and retry
+    if adapted == 0:
+        log.warning("ai.adapt_channels.all_failed_reverting", material_id=material_id)
+        with get_sync_session() as session:
+            from app.models.project_score import MaterialProjectScore
+            score = session.execute(
+                select(MaterialProjectScore).where(
+                    MaterialProjectScore.material_id == uuid.UUID(material_id),
+                    MaterialProjectScore.project_id == uuid.UUID(project_id),
+                    MaterialProjectScore.editorial_status == "in_progress",
+                )
+            ).scalar_one_or_none()
+            if score:
+                score.editorial_status = "inbox"
+                session.commit()
+                log.info("ai.adapt_channels.reverted_to_inbox", material_id=material_id)
+
     log.info("ai.adapt_channels.done", adapted=adapted)
     return {"status": "ok", "adapted": adapted}
 

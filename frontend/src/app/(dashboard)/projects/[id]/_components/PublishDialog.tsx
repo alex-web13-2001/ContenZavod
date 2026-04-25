@@ -157,17 +157,27 @@ export function PublishDialog({
           </div>
         )}
 
-        {/* Already published */}
-        {adaptations.some(a => a.status === "published") && (
+        {/* Already published or publishing */}
+        {adaptations.some(a => a.status === "approved" || a.status === "published") && (
           <div style={{
             padding: "10px 14px", borderRadius: 8,
             backgroundColor: "hsl(var(--cz-success) / 0.06)",
             fontSize: 13, color: "hsl(var(--cz-success))", fontWeight: 600,
           }}>
-            ✅ Уже опубликовано: {adaptations.filter(a => a.status === "published").map(a => {
-              const lang = LANG_OPTIONS.find(l => l.code === a.language);
-              return `${lang?.flag || ""} ${formatLabels[a.content_format] || a.content_format}`;
-            }).join(", ")}
+            {adaptations.filter(a => a.status === "published").length > 0 && (
+              <div>✅ Опубликовано: {adaptations.filter(a => a.status === "published").map(a => {
+                const lang = LANG_OPTIONS.find(l => l.code === a.language);
+                return `${lang?.flag || ""} ${formatLabels[a.content_format] || a.content_format}`;
+              }).join(", ")}</div>
+            )}
+            {adaptations.filter(a => a.status === "approved").length > 0 && (
+              <div style={{ color: "hsl(var(--cz-accent))", marginTop: adaptations.some(a => a.status === "published") ? 4 : 0 }}>
+                ⏳ Публикуется: {adaptations.filter(a => a.status === "approved").map(a => {
+                  const lang = LANG_OPTIONS.find(l => l.code === a.language);
+                  return `${lang?.flag || ""} ${formatLabels[a.content_format] || a.content_format}`;
+                }).join(", ")}
+              </div>
+            )}
           </div>
         )}
 

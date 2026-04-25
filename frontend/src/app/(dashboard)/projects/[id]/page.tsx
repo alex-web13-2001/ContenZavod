@@ -175,26 +175,41 @@ export default function ProjectDetailPage() {
   const handleBatchPublish = async (scoreId: string, adaptationIds: string[]) => {
     setPublishingBatch(true);
     try {
-      await api.post(`/projects/${projectId}/recommendations/${scoreId}/publish-batch`, {
+      const resp = await api.post<{ editorial_status: string }>(`/projects/${projectId}/recommendations/${scoreId}/publish-batch`, {
         adaptation_ids: adaptationIds,
       });
 
-      // Animate card exit
-      setExitingCards((prev) => new Set(prev).add(scoreId));
       setPublishDialogScoreId(null);
 
-      setTimeout(() => {
-        setMaterials((prev) => prev.filter((m) => m.id !== scoreId));
-        setExitingCards((prev) => { const next = new Set(prev); next.delete(scoreId); return next; });
-        setPipelineCounts((prev) => ({
-          ...prev,
-          in_progress: Math.max(0, prev.in_progress - 1),
-          published: prev.published + 1,
-        }));
-        showToast(`📤 Опубликовано (${adaptationIds.length}) — отправляется в каналы`, "success");
-      }, 400);
+      // Mark published adaptations optimistically
+      setAdaptations((prev) => {
+        const next = { ...prev };
+        for (const matId of Object.keys(next)) {
+          next[matId] = next[matId].map((a) =>
+            adaptationIds.includes(a.id) ? { ...a, status: "approved" } : a
+          );
+        }
+        return next;
+      });
 
-      // Sync
+      // If backend says material moved to 'published' (all adaptations done),
+      // animate card exit from in_progress
+      if (resp.editorial_status === "published") {
+        setExitingCards((prev) => new Set(prev).add(scoreId));
+        setTimeout(() => {
+          setMaterials((prev) => prev.filter((m) => m.id !== scoreId));
+          setExitingCards((prev) => { const next = new Set(prev); next.delete(scoreId); return next; });
+          setPipelineCounts((prev) => ({
+            ...prev,
+            in_progress: Math.max(0, prev.in_progress - 1),
+            published: prev.published + 1,
+          }));
+        }, 400);
+      }
+
+      showToast(`📤 Опубликовано (${adaptationIds.length}) — отправляется в каналы`, "success");
+
+      // Sync to get updated state
       setTimeout(() => fetchRecommendationsAndAdaptations({ silent: true }), 3000);
     } catch (e) {
       console.error(e);

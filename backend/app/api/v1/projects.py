@@ -457,7 +457,7 @@ async def batch_publish_adaptations(
     3. Queues Celery tasks for actual sending
     """
     import uuid as _uuid
-    from sqlalchemy import select, update
+    from sqlalchemy import select, update, func
     from app.models.project_score import MaterialProjectScore
     from app.models.channel_adaptation import ChannelAdaptation
     from app.models.channel import Channel
@@ -523,8 +523,19 @@ async def batch_publish_adaptations(
             "channel_name": channel.name if channel else "—",
         })
 
-    # Move material to published
-    score.editorial_status = "published"
+    # Only move material to 'published' if ALL adaptations are now approved/published
+    # If there are remaining drafts, keep in 'in_progress' so user can publish them later
+    remaining_drafts = (await db.execute(
+        select(func.count()).select_from(ChannelAdaptation).where(
+            ChannelAdaptation.material_id == score.material_id,
+            ChannelAdaptation.status == "draft",
+        )
+    )).scalar() or 0
+
+    if remaining_drafts == 0:
+        score.editorial_status = "published"
+    # else: stays in_progress — user can still publish remaining languages
+
     await db.commit()
 
     # Queue Celery tasks after commit
