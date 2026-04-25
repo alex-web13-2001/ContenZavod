@@ -263,6 +263,8 @@ async def list_project_recommendations(
             "summary_ru": ai_data.get("summary_ru"),
             "tags": ai_data.get("tags", []),
             "is_breaking": ai_data.get("is_breaking", False),
+            "cover_image_url": meta.get("cover_image", {}).get("url") if (meta := (material.metadata_ or {})) else None,
+            "cover_status": (material.metadata_ or {}).get("cover_status"),
         }
 
         # For published items — enrich with publish data + ALL published adaptations
@@ -534,3 +536,52 @@ async def batch_publish_adaptations(
         "published_count": len(publish_job_ids),
         "details": published_details,
     }
+
+
+@router.post("/{project_id}/materials/{material_id}/generate-cover", status_code=202)
+async def generate_material_cover(
+    project_id: str,
+    material_id: str,
+    language: str = Query("ru", description="Language for text overlay"),
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _user: str = Depends(get_current_user_id),
+):
+    """Generate an AI cover image for a material.
+
+    Uses Gemini to create an optimal prompt, then GPT Image-2 to generate
+    a photorealistic 16:9 image matching the news topic.
+    """
+    import uuid as _uuid
+    from sqlalchemy import select
+    from app.models.project_score import MaterialProjectScore
+
+    tid = _uuid.UUID(tenant_id)
+
+    # Verify material exists and belongs to this project
+    score = (await db.execute(
+        select(MaterialProjectScore).where(
+            MaterialProjectScore.project_id == _uuid.UUID(project_id),
+            MaterialProjectScore.material_id == _uuid.UUID(material_id),
+            MaterialProjectScore.tenant_id == tid,
+        )
+    )).scalar_one_or_none()
+
+    if not score:
+        raise HTTPException(status_code=404, detail="Материал не найден в проекте")
+
+    # Launch Celery task
+    from workers.ai_tasks import generate_cover_image
+
+    task = generate_cover_image.delay(
+        material_id=material_id,
+        tenant_id=tenant_id,
+        language=language,
+    )
+
+    return {
+        "status": "generating",
+        "task_id": task.id,
+        "material_id": material_id,
+    }
+

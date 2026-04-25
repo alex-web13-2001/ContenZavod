@@ -490,3 +490,113 @@ def adapt_single_format(
             raise self.retry(exc=e, countdown=30 * (self.request.retries + 1))
 
     return {"status": "error", "reason": "empty_result"}
+
+
+@shared_task(
+    bind=True,
+    name="workers.ai_tasks.generate_cover_image",
+    max_retries=2,
+    queue="media_queue",
+)
+def generate_cover_image(self, material_id: str, tenant_id: str, language: str = "ru"):
+    """Generate an AI cover image for a material.
+
+    Flow:
+        1. Gemini generates an optimal prompt from news context
+        2. GPT Image-2 generates a photorealistic 16:9 image
+        3. Image is downloaded and saved to MinIO
+        4. Material metadata is updated with the cover URL
+    """
+    log = logger.bind(material_id=material_id, language=language)
+    log.info("image.generate.start")
+
+    with get_sync_session() as session:
+        material = session.get(RawMaterial, uuid.UUID(material_id))
+        if not material:
+            log.error("image.generate.material_not_found")
+            return {"status": "error", "reason": "not_found"}
+
+        if str(material.tenant_id) != tenant_id:
+            log.error("image.generate.tenant_mismatch")
+            return {"status": "error", "reason": "tenant_mismatch"}
+
+        # Mark as generating in metadata
+        meta = {**material.metadata_}
+        meta["cover_status"] = "generating"
+        material.metadata_ = meta
+        session.commit()
+
+        # Prepare context
+        ai_data = meta.get("ai_classification", {})
+        headline = ai_data.get("summary_ru") or material.title or ""
+        summary = ai_data.get("summary_en") or ai_data.get("summary_ru") or ""
+
+        from ai.image_generator import generate_cover_image as gen_image, ImageGenerationError
+
+        try:
+            result = _run_async(gen_image(
+                headline=headline,
+                summary=summary,
+                language=language,
+                content_text=material.content_text or "",
+            ))
+        except ImageGenerationError as e:
+            log.error("image.generate.failed", error=str(e))
+            meta = {**material.metadata_}
+            meta["cover_status"] = "error"
+            meta["cover_error"] = str(e)
+            material.metadata_ = meta
+            session.commit()
+            raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+
+        if not result or not result.get("image_url"):
+            log.error("image.generate.no_url")
+            meta = {**material.metadata_}
+            meta["cover_status"] = "error"
+            material.metadata_ = meta
+            session.commit()
+            return {"status": "error", "reason": "no_image_url"}
+
+        # Download image and save to MinIO
+        from app.services.storage import download_and_upload
+
+        object_name = f"covers/{material_id}.png"
+        try:
+            _run_async(download_and_upload(
+                url=result["image_url"],
+                object_name=object_name,
+            ))
+        except Exception as e:
+            log.error("image.generate.upload_failed", error=str(e))
+            meta = {**material.metadata_}
+            meta["cover_status"] = "error"
+            meta["cover_error"] = f"Upload failed: {e}"
+            material.metadata_ = meta
+            session.commit()
+            raise self.retry(exc=e, countdown=30 * (self.request.retries + 1))
+
+        # Update material metadata with cover info
+        meta = {**material.metadata_}
+        meta["cover_image"] = {
+            "url": f"/api/v1/files/{object_name}",
+            "prompt": result.get("prompt", ""),
+            "overlay_text": result.get("overlay_text", ""),
+            "task_id": result.get("task_id", ""),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "language": language,
+        }
+        meta["cover_status"] = "ready"
+        if "cover_error" in meta:
+            del meta["cover_error"]
+        material.metadata_ = meta
+        session.commit()
+
+        log.info(
+            "image.generate.done",
+            object_name=object_name,
+            overlay=result.get("overlay_text", "")[:50],
+        )
+        return {
+            "status": "ok",
+            "cover_url": f"/api/v1/files/{object_name}",
+        }

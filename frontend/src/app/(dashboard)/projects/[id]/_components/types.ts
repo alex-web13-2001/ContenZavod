@@ -40,6 +40,8 @@ export interface Material {
   tags?: string[];
   summary_ru?: string | null;
   is_breaking?: boolean;
+  cover_image_url?: string | null;
+  cover_status?: string | null;
   published_at?: string | null;
   platform_post_id?: string | null;
   published_headline?: string | null;

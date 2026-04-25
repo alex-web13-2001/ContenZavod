@@ -306,11 +306,54 @@ export function RejectedCard({ m, onRestore }: { m: Material; onRestore: (id: st
 }
 
 /* ═══ 4. IN_PROGRESS CARD header ═══ */
-export function InProgressCardHeader({ m }: { m: Material }) {
+export function InProgressCardHeader({ m, onGenerateCover, generatingCover }: {
+  m: Material;
+  onGenerateCover?: (materialId: string) => void;
+  generatingCover?: boolean;
+}) {
   const cat = m.category ? categoryLabels[m.category] : null;
   const title = resolveTitle(m);
+  const coverUrl = m.cover_image_url;
+  const coverStatus = generatingCover ? "generating" : m.cover_status;
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8010/api/v1";
+
   return (
     <>
+      {/* Cover image preview */}
+      {coverUrl && coverStatus === "ready" && (
+        <div style={{
+          marginBottom: 14, borderRadius: 12, overflow: "hidden",
+          position: "relative", aspectRatio: "16/9", maxHeight: 260,
+          backgroundColor: "hsl(var(--cz-bg-surface))",
+        }}>
+          <img
+            src={`${API_URL}${coverUrl.startsWith("/api/v1") ? coverUrl.replace("/api/v1", "") : coverUrl}`}
+            alt={title}
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+          />
+        </div>
+      )}
+
+      {/* Generating skeleton */}
+      {coverStatus === "generating" && (
+        <div style={{
+          marginBottom: 14, borderRadius: 12, overflow: "hidden",
+          aspectRatio: "16/9", maxHeight: 260,
+          backgroundColor: "hsl(var(--cz-bg-surface))",
+          border: "1px dashed hsl(var(--cz-accent) / 0.4)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          animation: "cz-pulse 2s ease-in-out infinite",
+        }}>
+          <div style={{ textAlign: "center" }}>
+            <Sparkles size={28} style={{ color: "hsl(var(--cz-accent))", marginBottom: 8 }} />
+            <div style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--cz-text-muted))" }}>
+              🎨 AI генерирует обложку...
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <RelativeDate iso={m.created_at} />
@@ -327,10 +370,56 @@ export function InProgressCardHeader({ m }: { m: Material }) {
         <a href={m.material_url || "#"} target="_blank" rel="noopener noreferrer" className="cz-link-pill" style={{ fontSize: 12 }}>
           <ExternalLink size={12} /> Источник
         </a>
-        {/* Placeholders */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7, border: "1px dashed hsl(var(--cz-border) / 0.5)", color: "hsl(var(--cz-text-muted))", fontSize: 11 }}>
-          <Image size={13} /> Картинка
-        </div>
+        {/* Cover image button — depends on state */}
+        {coverStatus === "ready" ? (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7,
+            backgroundColor: "hsl(var(--cz-success) / 0.12)", color: "hsl(var(--cz-success))",
+            fontSize: 11, fontWeight: 700,
+          }}>
+            <Check size={12} /> Обложка готова
+          </div>
+        ) : coverStatus === "generating" ? (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7,
+            backgroundColor: "hsl(var(--cz-accent) / 0.12)", color: "hsl(var(--cz-accent))",
+            fontSize: 11, fontWeight: 700, animation: "cz-pulse 2s ease-in-out infinite",
+          }}>
+            <Sparkles size={12} /> Генерируем...
+          </div>
+        ) : coverStatus === "error" ? (
+          <button
+            onClick={() => onGenerateCover?.(m.material_id || m.id)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7,
+              border: "1px solid hsl(var(--cz-error) / 0.5)", cursor: "pointer", fontSize: 11,
+              fontWeight: 700, backgroundColor: "hsl(var(--cz-error) / 0.08)",
+              color: "hsl(var(--cz-error))",
+            }}
+          >
+            <X size={12} /> Ошибка — повторить
+          </button>
+        ) : (
+          <button
+            onClick={() => onGenerateCover?.(m.material_id || m.id)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7,
+              border: "1px dashed hsl(var(--cz-accent) / 0.5)", cursor: "pointer", fontSize: 11,
+              fontWeight: 700, backgroundColor: "transparent", color: "hsl(var(--cz-accent))",
+              transition: "all 0.2s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = "hsl(var(--cz-accent) / 0.1)";
+              e.currentTarget.style.borderColor = "hsl(var(--cz-accent))";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = "transparent";
+              e.currentTarget.style.borderColor = "hsl(var(--cz-accent) / 0.5)";
+            }}
+          >
+            <Image size={13} /> 🎨 Сгенерировать обложку
+          </button>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 7, border: "1px dashed hsl(var(--cz-border) / 0.5)", color: "hsl(var(--cz-text-muted))", fontSize: 11 }}>
           <Clock size={13} /> Расписание
         </div>
@@ -338,3 +427,4 @@ export function InProgressCardHeader({ m }: { m: Material }) {
     </>
   );
 }
+

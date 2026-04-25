@@ -131,6 +131,8 @@ interface RecommendationsTabProps {
   onClosePublishDialog: () => void;
   onBatchPublish: (scoreId: string, adaptationIds: string[]) => void;
   publishingBatch?: boolean;
+  onGenerateCover?: (materialId: string) => void;
+  generatingCovers?: Record<string, boolean>;
 }
 
 export function RecommendationsTab({
@@ -141,6 +143,7 @@ export function RecommendationsTab({
   pipelineStatus, setPipelineStatus, pipelineCounts,
   dateFrom, setDateFrom, onPipelineAction, exitingCards,
   publishDialogScoreId, onOpenPublishDialog, onClosePublishDialog, onBatchPublish, publishingBatch,
+  onGenerateCover, generatingCovers,
 }: RecommendationsTabProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const empty = EMPTY_STATES[pipelineStatus];
@@ -226,7 +229,7 @@ export function RecommendationsTab({
             return (
               <div key={m.id} className={isExiting ? "cz-card-exiting" : ""}>
               <CzCard padding="lg">
-                <InProgressCardHeader m={m} />
+                <InProgressCardHeader m={m} onGenerateCover={onGenerateCover} generatingCover={generatingCovers?.[m.material_id || m.id]} />
 
                 {/* Adaptations block */}
                 <div style={{ padding: 16, borderRadius: 12, backgroundColor: "hsl(var(--cz-bg-base) / 0.5)", border: "1px solid hsl(var(--cz-border) / 0.5)" }}>

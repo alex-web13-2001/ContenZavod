@@ -166,6 +166,7 @@ export default function ProjectDetailPage() {
   /* ────── Batch Publish (new flow) ────── */
   const [publishDialogScoreId, setPublishDialogScoreId] = useState<string | null>(null);
   const [publishingBatch, setPublishingBatch] = useState(false);
+  const [generatingCovers, setGeneratingCovers] = useState<Record<string, boolean>>({});
 
   const handleOpenPublishDialog = (scoreId: string) => {
     setPublishDialogScoreId(scoreId);
@@ -200,6 +201,47 @@ export default function ProjectDetailPage() {
       showToast("Ошибка при публикации", "error");
     } finally {
       setPublishingBatch(false);
+    }
+  };
+
+  /* ────── Cover Image Generation ────── */
+  const handleGenerateCover = async (materialId: string) => {
+    setGeneratingCovers((prev) => ({ ...prev, [materialId]: true }));
+    try {
+      await api.post(`/projects/${projectId}/materials/${materialId}/generate-cover?language=ru`);
+      showToast("🎨 Генерация обложки запущена", "info");
+
+      // Poll for completion
+      const pollCover = (attempt: number) => {
+        if (attempt > 40) {
+          setGeneratingCovers((prev) => ({ ...prev, [materialId]: false }));
+          showToast("⏳ Генерация обложки заняла слишком долго", "error");
+          return;
+        }
+        setTimeout(async () => {
+          await fetchRecommendationsAndAdaptations({ silent: true });
+          // Check if cover is ready in updated materials
+          setMaterials((currentMaterials) => {
+            const mat = currentMaterials.find((m) => (m.material_id || m.id) === materialId);
+            if (mat?.cover_status === "ready" || mat?.cover_status === "error") {
+              setGeneratingCovers((prev) => ({ ...prev, [materialId]: false }));
+              if (mat.cover_status === "ready") {
+                showToast("✅ Обложка готова!", "success");
+              } else {
+                showToast("❌ Ошибка генерации обложки", "error");
+              }
+            } else {
+              pollCover(attempt + 1);
+            }
+            return currentMaterials;
+          });
+        }, 5000);
+      };
+      pollCover(0);
+    } catch (e) {
+      console.error(e);
+      setGeneratingCovers((prev) => ({ ...prev, [materialId]: false }));
+      showToast("Ошибка запуска генерации обложки", "error");
     }
   };
 
@@ -331,6 +373,8 @@ export default function ProjectDetailPage() {
           onClosePublishDialog={() => setPublishDialogScoreId(null)}
           onBatchPublish={handleBatchPublish}
           publishingBatch={publishingBatch}
+          onGenerateCover={handleGenerateCover}
+          generatingCovers={generatingCovers}
         />
       )}
 
