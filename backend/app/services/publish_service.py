@@ -61,7 +61,7 @@ class PublishService:
         adaptation = self._load_adaptation(job)
         channel = self._load_channel(job)
 
-        bot_token, chat_id = self._validate_config(channel)
+        bot_token, chat_id = self._validate_config(channel, language=adaptation.language)
         message_html = self._format_message(adaptation, bot_token)
 
         result = self._send(bot_token, chat_id, message_html)
@@ -95,11 +95,29 @@ class PublishService:
             raise PublishError("Channel not found")
         return channel
 
-    def _validate_config(self, channel: Channel) -> tuple[str, str]:
+    def _validate_config(self, channel: Channel, language: str | None = None) -> tuple[str, str]:
         """Extract and validate bot_token and chat_id from channel config.
+
+        Supports per-language endpoints: if config.endpoints.<lang>.chat_id exists,
+        it is used instead of the top-level chat_id.  This enables publishing
+        the same content to different Telegram chats per language.
+
+        Config format::
+
+            {
+                "bot_token": "123:ABC...",
+                "chat_id": "@fallback",           # default
+                "endpoints": {
+                    "ru": {"chat_id": "@chan_ru"},
+                    "en": {"chat_id": "@chan_en"},
+                    "el": {"chat_id": "@chan_el"}
+                }
+            }
 
         Args:
             channel: Channel model instance.
+            language: Target language code (e.g. "ru", "en", "el").
+                      Used to resolve per-language chat_id from endpoints.
 
         Returns:
             Tuple of (bot_token, chat_id).
@@ -109,16 +127,33 @@ class PublishService:
         """
         config = channel.config or {}
         bot_token = config.get("bot_token", "")
-        chat_id = config.get("chat_id", "")
+
+        # Per-language endpoint resolution
+        chat_id = ""
+        endpoints = config.get("endpoints", {})
+        if language and language in endpoints:
+            chat_id = endpoints[language].get("chat_id", "")
+            log.debug(
+                "publish.resolved_endpoint",
+                language=language,
+                chat_id=chat_id,
+                channel=channel.name,
+            )
+
+        # Fallback to top-level chat_id
+        if not chat_id:
+            chat_id = config.get("chat_id", "")
 
         if not bot_token or not chat_id:
             log.error(
                 "publish.missing_config",
                 channel_id=str(channel.id),
                 channel_name=channel.name,
+                language=language,
             )
             raise PublishError(
                 f"Channel '{channel.name}' missing bot_token or chat_id"
+                f" for language '{language or 'default'}'"
             )
 
         return bot_token, chat_id
@@ -192,6 +227,10 @@ class PublishService:
         job.error_message = None
 
         adaptation.status = "published"
+
+        # Note: editorial_status is now set explicitly by the
+        # batch-publish endpoint. We do NOT change it here to avoid
+        # race conditions with the batch flow.
 
         self.session.commit()
 

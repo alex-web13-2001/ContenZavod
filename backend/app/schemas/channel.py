@@ -16,6 +16,7 @@ class ChannelCreate(BaseModel):
     config: dict = Field(default_factory=dict)
     posting_rules: dict = Field(default_factory=dict)
     editorial_rules: str = ""
+    formatting_rules: str = ""
     is_active: bool = True
 
 
@@ -29,6 +30,7 @@ class ChannelUpdate(BaseModel):
     config: dict | None = None
     posting_rules: dict | None = None
     editorial_rules: str | None = None
+    formatting_rules: str | None = None
     is_active: bool | None = None
 
 
@@ -44,6 +46,7 @@ class ChannelResponse(BaseModel):
     config: dict
     posting_rules: dict
     editorial_rules: str
+    formatting_rules: str
     is_active: bool
     created_at: datetime
     updated_at: datetime

@@ -36,6 +36,9 @@ Rules:
 5. Use Telegram-compatible markdown (bold **text**, italic _text_, [links](url))
 6. DO NOT invent facts — use only information from the source material
 7. DO NOT include meta-text like "Вот пост:" or "Заголовок:", just output the content directly
+8. FORMATTING RULES ARE MANDATORY — if formatting rules are provided, you MUST follow them exactly.
+   This includes paragraph structure, line breaks between paragraphs, bold/emoji usage, and any other formatting directives.
+   Violations of formatting rules are NOT acceptable.
 
 Always call the adapt_content tool with your result.
 """
@@ -86,6 +89,8 @@ async def adapt_material_for_channel(
     content_format: str,
     tone_of_voice: str,
     language: str,
+    formatting_rules: str = "",
+    editorial_rules: str = "",
 ) -> dict[str, Any] | None:
     """Generate adapted content for a specific channel × format × language."""
     if not KIE_API_KEY:
@@ -105,6 +110,11 @@ Tone of Voice: {tone_of_voice or "Информативный, нейтральн
 
 --- FORMAT ---
 {format_instruction}
+
+--- FORMATTING RULES (ОБЯЗАТЕЛЬНО К ИСПОЛНЕНИЮ!) ---
+{formatting_rules or "Используй абзацы для разделения смысловых блоков. Между абзацами — пустая строка."}
+
+{f"--- EDITORIAL RULES ---{chr(10)}{editorial_rules}" if editorial_rules else ""}
 
 --- SOURCE MATERIAL ---
 Title: {material_data.get('original_title', '')}

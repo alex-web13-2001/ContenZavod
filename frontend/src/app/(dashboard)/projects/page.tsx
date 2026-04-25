@@ -2,17 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
-import { CzCard, CzBadge } from "@/components/ui-system";
-import {
-  FolderOpen,
-  Plus,
-  Send,
-  Globe,
-  Video,
-  ChevronRight,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { CzCard, CzBadge, CzButton, CzInput, CzDialog, CzPageHeader, CzEmptyState, CzSkeletonGrid } from "@/components/ui-system";
+import { FolderOpen, Plus, Send, Sparkles, ChevronRight } from "lucide-react";
 import Link from "next/link";
 
 interface Project {
@@ -27,18 +18,11 @@ interface Project {
   created_at: string;
 }
 
-const platformIcons: Record<string, { icon: typeof Send; label: string }> = {
-  telegram: { icon: Send, label: "Telegram" },
-  website: { icon: Globe, label: "Сайт" },
-  youtube: { icon: Video, label: "YouTube" },
-};
-
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
 
-  // Create form state
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
   const [formTopic, setFormTopic] = useState("");
@@ -55,9 +39,7 @@ export default function ProjectsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects]);
+  useEffect(() => { fetchProjects(); }, [fetchProjects]);
 
   const handleCreate = async () => {
     if (!formName.trim()) return;
@@ -70,10 +52,7 @@ export default function ProjectsPage() {
         target_audience: formAudience,
       });
       setShowCreate(false);
-      setFormName("");
-      setFormDescription("");
-      setFormTopic("");
-      setFormAudience("");
+      setFormName(""); setFormDescription(""); setFormTopic(""); setFormAudience("");
       fetchProjects();
     } finally {
       setCreating(false);
@@ -81,413 +60,104 @@ export default function ProjectsPage() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-      {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: "12px",
-        }}
-      >
-        <div>
-          <h1
-            style={{
-              fontSize: "24px",
-              fontWeight: 700,
-              color: `hsl(var(--cz-text-primary))`,
-              letterSpacing: "-0.02em",
-            }}
-          >
-            Проекты
-          </h1>
-          <p
-            style={{
-              fontSize: "14px",
-              color: `hsl(var(--cz-text-muted))`,
-              marginTop: "4px",
-            }}
-          >
-            Тематические медиа-проекты с каналами публикации
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "8px 16px",
-            fontSize: "13px",
-            fontWeight: 600,
-            borderRadius: "var(--cz-radius-md)",
-            backgroundColor: `hsl(var(--cz-accent))`,
-            color: "white",
-            border: "none",
-            cursor: "pointer",
-            transition: "all 0.2s ease",
-          }}
-        >
-          <Plus size={14} />
-          Создать проект
-        </button>
-      </div>
+    <div className="cz-page">
+      <CzPageHeader title="Проекты" subtitle="Тематические медиа-проекты с каналами публикации">
+        <CzButton onClick={() => setShowCreate(true)} icon={<Plus size={14} />}>Создать проект</CzButton>
+      </CzPageHeader>
 
-      {/* Create form modal */}
-      {showCreate && (
-        <CzCard>
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <h3
-                style={{
-                  fontSize: "16px",
-                  fontWeight: 600,
-                  color: `hsl(var(--cz-text-primary))`,
-                }}
-              >
-                Новый проект
-              </h3>
-              <button
-                onClick={() => setShowCreate(false)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  color: `hsl(var(--cz-text-muted))`,
-                }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: `hsl(var(--cz-text-secondary))`,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                  }}
-                >
-                  Название *
-                </label>
-                <input
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  placeholder="CyprusNews"
-                  style={{
-                    padding: "8px 12px",
-                    fontSize: "13px",
-                    borderRadius: "var(--cz-radius-md)",
-                    border: `1px solid hsl(var(--cz-border))`,
-                    backgroundColor: `hsl(var(--cz-bg-surface))`,
-                    color: `hsl(var(--cz-text-primary))`,
-                    outline: "none",
-                  }}
-                />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: `hsl(var(--cz-text-secondary))`,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                  }}
-                >
-                  Описание
-                </label>
-                <input
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="Новостной медиа-проект"
-                  style={{
-                    padding: "8px 12px",
-                    fontSize: "13px",
-                    borderRadius: "var(--cz-radius-md)",
-                    border: `1px solid hsl(var(--cz-border))`,
-                    backgroundColor: `hsl(var(--cz-bg-surface))`,
-                    color: `hsl(var(--cz-text-primary))`,
-                    outline: "none",
-                  }}
-                />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label
-                style={{
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  color: `hsl(var(--cz-text-secondary))`,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                Тематика — что публикуем (для AI-отбора)
-              </label>
-              <textarea
-                value={formTopic}
-                onChange={(e) => setFormTopic(e.target.value)}
-                placeholder="Экономика, политика, бизнес, визы, налоги Кипра. НЕ: спорт, светская хроника."
-                rows={3}
-                style={{
-                  padding: "8px 12px",
-                  fontSize: "13px",
-                  borderRadius: "var(--cz-radius-md)",
-                  border: `1px solid hsl(var(--cz-border))`,
-                  backgroundColor: `hsl(var(--cz-bg-surface))`,
-                  color: `hsl(var(--cz-text-primary))`,
-                  outline: "none",
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                }}
-              />
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label
-                style={{
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  color: `hsl(var(--cz-text-secondary))`,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                Целевая аудитория
-              </label>
-              <textarea
-                value={formAudience}
-                onChange={(e) => setFormAudience(e.target.value)}
-                placeholder="Русскоязычные предприниматели 30-55 лет, инвесторы на Кипре"
-                rows={2}
-                style={{
-                  padding: "8px 12px",
-                  fontSize: "13px",
-                  borderRadius: "var(--cz-radius-md)",
-                  border: `1px solid hsl(var(--cz-border))`,
-                  backgroundColor: `hsl(var(--cz-bg-surface))`,
-                  color: `hsl(var(--cz-text-primary))`,
-                  outline: "none",
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                }}
-              />
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-              <button
-                onClick={() => setShowCreate(false)}
-                style={{
-                  padding: "8px 16px",
-                  fontSize: "13px",
-                  fontWeight: 500,
-                  borderRadius: "var(--cz-radius-md)",
-                  backgroundColor: "transparent",
-                  color: `hsl(var(--cz-text-secondary))`,
-                  border: `1px solid hsl(var(--cz-border))`,
-                  cursor: "pointer",
-                }}
-              >
-                Отмена
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={creating || !formName.trim()}
-                style={{
-                  padding: "8px 20px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  borderRadius: "var(--cz-radius-md)",
-                  backgroundColor: `hsl(var(--cz-accent))`,
-                  color: "white",
-                  border: "none",
-                  cursor: creating ? "not-allowed" : "pointer",
-                  opacity: creating || !formName.trim() ? 0.6 : 1,
-                }}
-              >
-                {creating ? "Создаю..." : "Создать"}
-              </button>
-            </div>
+      {/* Create dialog */}
+      <CzDialog open={showCreate} onClose={() => setShowCreate(false)} title="Новый проект">
+        <div className="cz-form">
+          <div className="cz-form-row">
+            <CzInput label="Название *" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="CyprusNews" />
+            <CzInput label="Описание" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} placeholder="Новостной медиа-проект" />
           </div>
-        </CzCard>
-      )}
 
-      {/* Projects list */}
-      {loading ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="skeleton" style={{ height: "120px" }} />
-          ))}
-        </div>
-      ) : projects.length === 0 ? (
-        <CzCard>
-          <div style={{ textAlign: "center", padding: "64px 24px" }}>
-            <FolderOpen
-              size={48}
+          <div className="cz-form-group">
+            <label className="cz-form-label">Тематика — что публикуем (для AI-отбора)</label>
+            <textarea
+              value={formTopic}
+              onChange={(e) => setFormTopic(e.target.value)}
+              placeholder="Экономика, политика, бизнес, визы, налоги Кипра. НЕ: спорт, светская хроника."
+              rows={3}
               style={{
-                color: `hsl(var(--cz-text-muted))`,
-                margin: "0 auto 16px",
+                padding: "8px 12px", fontSize: 13, borderRadius: "var(--cz-radius-md)",
+                border: "1px solid hsl(var(--cz-border))", backgroundColor: "hsl(var(--cz-bg-surface))",
+                color: "hsl(var(--cz-text-primary))", outline: "none", resize: "vertical", fontFamily: "inherit",
               }}
             />
-            <h3
-              style={{
-                fontSize: "16px",
-                fontWeight: 600,
-                color: `hsl(var(--cz-text-secondary))`,
-              }}
-            >
-              Нет проектов
-            </h3>
-            <p
-              style={{
-                fontSize: "13px",
-                color: `hsl(var(--cz-text-muted))`,
-                marginTop: "6px",
-              }}
-            >
-              Создайте первый проект, чтобы начать управлять контентом
-            </p>
           </div>
-        </CzCard>
+
+          <div className="cz-form-group">
+            <label className="cz-form-label">Целевая аудитория</label>
+            <textarea
+              value={formAudience}
+              onChange={(e) => setFormAudience(e.target.value)}
+              placeholder="Русскоязычные предприниматели 30-55 лет, инвесторы на Кипре"
+              rows={2}
+              style={{
+                padding: "8px 12px", fontSize: 13, borderRadius: "var(--cz-radius-md)",
+                border: "1px solid hsl(var(--cz-border))", backgroundColor: "hsl(var(--cz-bg-surface))",
+                color: "hsl(var(--cz-text-primary))", outline: "none", resize: "vertical", fontFamily: "inherit",
+              }}
+            />
+          </div>
+
+          <div className="cz-flex" style={{ justifyContent: "flex-end", gap: 8 }}>
+            <CzButton variant="ghost" onClick={() => setShowCreate(false)}>Отмена</CzButton>
+            <CzButton onClick={handleCreate} disabled={creating || !formName.trim()}>
+              {creating ? "Создаю..." : "Создать"}
+            </CzButton>
+          </div>
+        </div>
+      </CzDialog>
+
+      {/* Projects grid */}
+      {loading ? (
+        <CzSkeletonGrid count={3} />
+      ) : projects.length === 0 ? (
+        <CzEmptyState
+          icon={<FolderOpen size={48} />}
+          title="Нет проектов"
+          text="Создайте первый проект, чтобы начать управлять контентом"
+          action={<CzButton onClick={() => setShowCreate(true)} icon={<Plus size={14} />}>Создать проект</CzButton>}
+        />
       ) : (
-        <div
-          className="stagger-children"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-            gap: "16px",
-          }}
-        >
+        <div className="cz-card-grid stagger-children" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
           {projects.map((p) => (
-            <Link
-              key={p.id}
-              href={`/projects/${p.id}`}
-              style={{ textDecoration: "none" }}
-            >
+            <Link key={p.id} href={`/projects/${p.id}`} style={{ textDecoration: "none" }}>
               <CzCard interactive padding="md">
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "12px",
-                    height: "100%",
-                  }}
-                >
-                  {/* Project header */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      justifyContent: "space-between",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "10px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: "40px",
-                          height: "40px",
-                          borderRadius: "var(--cz-radius-md)",
-                          background: `linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))`,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: "white",
-                          fontSize: "16px",
-                          fontWeight: 700,
-                          flexShrink: 0,
-                        }}
-                      >
+                <div className="cz-flex-col cz-gap-12" style={{ height: "100%" }}>
+                  {/* Header */}
+                  <div className="cz-flex-between cz-items-start">
+                    <div className="cz-flex cz-items-center cz-gap-12">
+                      <div className="cz-flex-center cz-flex-shrink-0" style={{
+                        width: 40, height: 40, borderRadius: "var(--cz-radius-md)",
+                        background: "linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))",
+                        color: "white", fontSize: 16, fontWeight: 700,
+                      }}>
                         {p.name.charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <div
-                          style={{
-                            fontSize: "15px",
-                            fontWeight: 600,
-                            color: `hsl(var(--cz-text-primary))`,
-                          }}
-                        >
-                          {p.name}
-                        </div>
-                        {p.description && (
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: `hsl(var(--cz-text-muted))`,
-                              marginTop: "2px",
-                            }}
-                          >
-                            {p.description}
-                          </div>
-                        )}
+                        <div className="cz-text-lg cz-font-semibold">{p.name}</div>
+                        {p.description && <div className="cz-text-sm cz-text-muted" style={{ marginTop: 2 }}>{p.description}</div>}
                       </div>
                     </div>
-                    <ChevronRight
-                      size={16}
-                      style={{ color: `hsl(var(--cz-text-muted))`, flexShrink: 0 }}
-                    />
+                    <ChevronRight size={16} className="cz-text-muted cz-flex-shrink-0" />
                   </div>
 
-                  {/* Stats row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "16px",
-                      marginTop: "auto",
-                      paddingTop: "8px",
-                      borderTop: `1px solid hsl(var(--cz-border-subtle))`,
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px",
-                        fontSize: "12px",
-                        color: `hsl(var(--cz-text-muted))`,
-                      }}
-                    >
-                      <Send size={12} />
-                      {p.channel_count} каналов
+                  {/* Stats */}
+                  <div className="cz-flex cz-items-center cz-gap-16" style={{
+                    marginTop: "auto", paddingTop: 8, borderTop: "1px solid hsl(var(--cz-border-subtle))",
+                  }}>
+                    <div className="cz-flex cz-items-center cz-gap-6 cz-text-sm cz-text-muted">
+                      <Send size={12} /> {p.channel_count} каналов
                     </div>
-
                     {p.recommendation_count > 0 && (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          fontSize: "12px",
-                          color: `hsl(var(--cz-success))`,
-                          fontWeight: 600,
-                        }}
-                      >
-                        <Sparkles size={12} />
-                        {p.recommendation_count} рекомендаций
+                      <div className="cz-flex cz-items-center cz-gap-6 cz-text-sm cz-font-semibold cz-text-success">
+                        <Sparkles size={12} /> {p.recommendation_count} рекомендаций
                       </div>
                     )}
-
                     <CzBadge variant={p.is_active ? "success" : "default"}>
                       {p.is_active ? "Активен" : "Неактивен"}
                     </CzBadge>

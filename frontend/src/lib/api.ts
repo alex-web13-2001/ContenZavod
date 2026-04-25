@@ -42,7 +42,9 @@ class ApiClient {
       } else if (Array.isArray(data.detail)) {
         message = data.detail.map((e: { msg?: string }) => e.msg || "").filter(Boolean).join("; ");
       }
-      throw new Error(message);
+      const error = new Error(message) as Error & { status: number };
+      error.status = res.status;
+      throw error;
     }
 
     if (res.status === 204) return undefined as T;

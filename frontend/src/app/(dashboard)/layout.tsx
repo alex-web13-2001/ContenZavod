@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   Menu,
 } from "lucide-react";
+import { ToastProvider } from "@/components/ui-system";
 
 const navItems = [
   { href: "/", label: "Дашборд", icon: LayoutDashboard },
@@ -85,6 +86,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const sidebarWidth = sidebarOpen ? "var(--cz-sidebar-width)" : "var(--cz-sidebar-collapsed)";
 
   return (
+    <ToastProvider>
     <div className="cz-flex" style={{ minHeight: "100dvh" }}>
       {/* Mobile overlay */}
       {mobileOpen && (
@@ -190,5 +192,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </main>
     </div>
+    </ToastProvider>
   );
 }

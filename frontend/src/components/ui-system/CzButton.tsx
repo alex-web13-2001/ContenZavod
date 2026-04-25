@@ -2,7 +2,7 @@
 
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
+type Variant = "primary" | "secondary" | "ghost" | "danger" | "success" | "ghost-danger" | "outline";
 type Size = "sm" | "md" | "lg";
 
 interface CzButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -35,6 +35,22 @@ const variantStyles: Record<Variant, React.CSSProperties> = {
     background: `hsl(var(--cz-error) / 0.1)`,
     color: `hsl(var(--cz-error))`,
     border: `1px solid hsl(var(--cz-error) / 0.2)`,
+  },
+  success: {
+    background: `hsl(var(--cz-success))`,
+    color: "white",
+    border: "none",
+    boxShadow: "0 2px 12px hsl(var(--cz-success) / 0.3)",
+  },
+  "ghost-danger": {
+    background: "transparent",
+    color: `hsl(var(--cz-error))`,
+    border: `1px solid hsl(var(--cz-error) / 0.3)`,
+  },
+  outline: {
+    background: "transparent",
+    color: `hsl(var(--cz-accent))`,
+    border: `1px dashed hsl(var(--cz-accent) / 0.4)`,
   },
 };
 

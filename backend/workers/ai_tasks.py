@@ -355,6 +355,8 @@ def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_
                         content_format=primary_format,
                         tone_of_voice=channel.tone_of_voice,
                         language=language,
+                        formatting_rules=channel.formatting_rules,
+                        editorial_rules=channel.editorial_rules,
                     ))
 
                     if result:
@@ -459,6 +461,8 @@ def adapt_single_format(
                 content_format=content_format,
                 tone_of_voice=channel.tone_of_voice,
                 language=language,
+                formatting_rules=channel.formatting_rules,
+                editorial_rules=channel.editorial_rules,
             ))
 
             if result:

@@ -7,7 +7,7 @@ at the project level, not channel level.
 
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Integer, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,6 +45,11 @@ class MaterialProjectScore(Base, TenantMixin, TimestampMixin):
         Boolean, server_default="false", nullable=False
     )
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Editorial pipeline status: inbox → in_progress → published → rejected
+    editorial_status: Mapped[str] = mapped_column(
+        String(20), server_default="inbox", nullable=False, index=True
+    )
 
     # Relationships
     material = relationship("RawMaterial", backref="project_scores")

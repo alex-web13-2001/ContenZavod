@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 interface CzDialogProps {
@@ -14,6 +15,10 @@ interface CzDialogProps {
 export function CzDialog({ open, onClose, title, children, maxWidth = "480px" }: CzDialogProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  // Portal needs to wait for client mount
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (open) {
@@ -27,16 +32,16 @@ export function CzDialog({ open, onClose, title, children, maxWidth = "480px" }:
     return () => { document.body.style.overflow = ""; };
   }, [open]);
 
-  if (!visible) return null;
+  if (!visible || !mounted) return null;
 
-  return (
+  const dialog = (
     <div
       ref={overlayRef}
       onClick={(e) => { if (e.target === overlayRef.current) onClose(); }}
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 50,
+        zIndex: 9999,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -113,4 +118,7 @@ export function CzDialog({ open, onClose, title, children, maxWidth = "480px" }:
       </div>
     </div>
   );
+
+  return createPortal(dialog, document.body);
 }
+

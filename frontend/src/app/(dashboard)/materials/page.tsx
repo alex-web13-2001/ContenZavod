@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
-import { CzCard, CzBadge, CzSelect } from "@/components/ui-system";
+import { CzCard, CzBadge, CzSelect, CzButton, CzPageHeader, CzEmptyState, CzSkeletonTable } from "@/components/ui-system";
 import { FileText, Sparkles, ExternalLink, ChevronDown, ChevronUp, Zap, Globe, TrendingUp } from "lucide-react";
 
 interface Material {
@@ -73,18 +73,11 @@ const statusOptions = [
 function RelevanceBar({ score }: { score: number }) {
   const color = score >= 80 ? "var(--cz-success)" : score >= 50 ? "var(--cz-warning)" : "var(--cz-text-muted)";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-      <div style={{
-        width: "60px", height: "6px", borderRadius: "3px",
-        backgroundColor: `hsl(${color} / 0.15)`, overflow: "hidden",
-      }}>
-        <div style={{
-          width: `${score}%`, height: "100%", borderRadius: "3px",
-          backgroundColor: `hsl(${color})`,
-          transition: "width 0.5s ease",
-        }} />
+    <div className="cz-flex cz-items-center cz-gap-8">
+      <div style={{ width: 60, height: 6, borderRadius: 3, backgroundColor: `hsl(${color} / 0.15)`, overflow: "hidden" }}>
+        <div style={{ width: `${score}%`, height: "100%", borderRadius: 3, backgroundColor: `hsl(${color})`, transition: "width 0.5s ease" }} />
       </div>
-      <span style={{ fontSize: "12px", fontWeight: 600, color: `hsl(${color})`, minWidth: "28px" }}>{score}</span>
+      <span className="cz-text-sm cz-font-semibold" style={{ color: `hsl(${color})`, minWidth: 28 }}>{score}</span>
     </div>
   );
 }
@@ -92,12 +85,9 @@ function RelevanceBar({ score }: { score: number }) {
 function TagChip({ tag }: { tag: string }) {
   return (
     <span style={{
-      display: "inline-flex", alignItems: "center",
-      padding: "2px 8px", fontSize: "11px", fontWeight: 500,
-      borderRadius: "6px",
-      backgroundColor: `hsl(var(--cz-accent) / 0.08)`,
-      color: `hsl(var(--cz-accent))`,
-      border: `1px solid hsl(var(--cz-accent) / 0.15)`,
+      display: "inline-flex", alignItems: "center", padding: "2px 8px", fontSize: 11, fontWeight: 500,
+      borderRadius: 6, backgroundColor: "hsl(var(--cz-accent) / 0.08)", color: "hsl(var(--cz-accent))",
+      border: "1px solid hsl(var(--cz-accent) / 0.15)",
     }}>{tag}</span>
   );
 }
@@ -142,7 +132,6 @@ export default function MaterialsPage() {
     setClassifyLoading(true);
     try {
       await api.post("/materials/classify-all", {});
-      // Poll for results
       setTimeout(() => fetchMaterials(statusFilter, channelFilter), 5000);
       setTimeout(() => fetchMaterials(statusFilter, channelFilter), 15000);
       setTimeout(() => fetchMaterials(statusFilter, channelFilter), 30000);
@@ -157,109 +146,56 @@ export default function MaterialsPage() {
     .reduce((acc, m, _, arr) => acc + (m.relevance_score! / arr.length), 0);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+    <div className="cz-page">
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
-        <div>
-          <h1 style={{ fontSize: "24px", fontWeight: 700, color: `hsl(var(--cz-text-primary))`, letterSpacing: "-0.02em" }}>Материалы</h1>
-          <p style={{ fontSize: "14px", color: `hsl(var(--cz-text-muted))`, marginTop: "4px" }}>{total} материалов</p>
+      <CzPageHeader title="Материалы" subtitle={`${total} материалов`}>
+        {newCount > 0 && (
+          <CzButton onClick={handleClassifyAll} disabled={classifyLoading} icon={<Sparkles size={14} />}>
+            {classifyLoading ? "Классификация..." : `Классифицировать (${newCount})`}
+          </CzButton>
+        )}
+        <div style={{ width: 220 }}>
+          <CzSelect value={channelFilter} onChange={setChannelFilter} options={channels} />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          {newCount > 0 && (
-            <button
-              onClick={handleClassifyAll}
-              disabled={classifyLoading}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: "8px",
-                padding: "8px 16px", fontSize: "13px", fontWeight: 600,
-                borderRadius: "var(--cz-radius-md)",
-                backgroundColor: `hsl(var(--cz-accent))`,
-                color: "white", border: "none", cursor: classifyLoading ? "not-allowed" : "pointer",
-                opacity: classifyLoading ? 0.6 : 1,
-                transition: "all 0.2s ease",
-              }}
-            >
-              <Sparkles size={14} />
-              {classifyLoading ? "Классификация..." : `Классифицировать (${newCount})`}
-            </button>
-          )}
-          <div style={{ width: "220px" }}>
-            <CzSelect value={channelFilter} onChange={setChannelFilter} options={channels} />
-          </div>
-          <div style={{ width: "160px" }}>
-            <CzSelect value={statusFilter} onChange={setStatusFilter} options={statusOptions} />
-          </div>
+        <div style={{ width: 160 }}>
+          <CzSelect value={statusFilter} onChange={setStatusFilter} options={statusOptions} />
         </div>
-      </div>
+      </CzPageHeader>
 
       {/* Stats bar */}
       {classifiedCount > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "12px" }}>
-          <CzCard padding="sm">
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <div style={{
-                width: "36px", height: "36px", borderRadius: "var(--cz-radius-md)",
-                backgroundColor: `hsl(var(--cz-success) / 0.1)`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <Sparkles size={18} style={{ color: `hsl(var(--cz-success))` }} />
-              </div>
-              <div>
-                <div style={{ fontSize: "20px", fontWeight: 700, color: `hsl(var(--cz-text-primary))` }}>{classifiedCount}</div>
-                <div style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))` }}>Классифицировано</div>
-              </div>
-            </div>
-          </CzCard>
-          <CzCard padding="sm">
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <div style={{
-                width: "36px", height: "36px", borderRadius: "var(--cz-radius-md)",
-                backgroundColor: `hsl(var(--cz-accent) / 0.1)`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <TrendingUp size={18} style={{ color: `hsl(var(--cz-accent))` }} />
-              </div>
-              <div>
-                <div style={{ fontSize: "20px", fontWeight: 700, color: `hsl(var(--cz-text-primary))` }}>{Math.round(avgRelevance)}</div>
-                <div style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))` }}>Ср. релевантность</div>
-              </div>
-            </div>
-          </CzCard>
-          <CzCard padding="sm">
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <div style={{
-                width: "36px", height: "36px", borderRadius: "var(--cz-radius-md)",
-                backgroundColor: `hsl(var(--cz-info) / 0.1)`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <Globe size={18} style={{ color: `hsl(var(--cz-info))` }} />
-              </div>
-              <div>
-                <div style={{ fontSize: "20px", fontWeight: 700, color: `hsl(var(--cz-text-primary))` }}>
-                  {new Set(materials.map(m => m.category).filter(Boolean)).size}
+        <div className="cz-card-grid--stats">
+          {[
+            { icon: Sparkles, color: "var(--cz-success)", value: classifiedCount, label: "Классифицировано" },
+            { icon: TrendingUp, color: "var(--cz-accent)", value: Math.round(avgRelevance), label: "Ср. релевантность" },
+            { icon: Globe, color: "var(--cz-info)", value: new Set(materials.map(m => m.category).filter(Boolean)).size, label: "Категорий" },
+          ].map((stat) => (
+            <CzCard key={stat.label} padding="sm">
+              <div className="cz-flex cz-items-center cz-gap-12">
+                <div className="cz-icon-box cz-icon-box--sm" style={{ backgroundColor: `hsl(${stat.color} / 0.1)` }}>
+                  <stat.icon size={18} style={{ color: `hsl(${stat.color})` }} />
                 </div>
-                <div style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))` }}>Категорий</div>
+                <div>
+                  <div className="cz-font-bold" style={{ fontSize: 20 }}>{stat.value}</div>
+                  <div className="cz-text-xs cz-text-muted">{stat.label}</div>
+                </div>
               </div>
-            </div>
-          </CzCard>
+            </CzCard>
+          ))}
         </div>
       )}
 
       {/* Materials list */}
       {loading ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          {[1, 2, 3, 4, 5].map((i) => <div key={i} className="skeleton" style={{ height: "80px" }} />)}
-        </div>
+        <CzSkeletonTable rows={5} />
       ) : materials.length === 0 ? (
-        <CzCard>
-          <div style={{ textAlign: "center", padding: "48px 24px" }}>
-            <FileText size={48} style={{ color: `hsl(var(--cz-text-muted))`, margin: "0 auto 16px" }} />
-            <h3 style={{ fontSize: "16px", fontWeight: 600, color: `hsl(var(--cz-text-secondary))` }}>Нет материалов</h3>
-            <p style={{ fontSize: "13px", color: `hsl(var(--cz-text-muted))`, marginTop: "6px" }}>Материалы появятся после парсинга источников</p>
-          </div>
-        </CzCard>
+        <CzEmptyState
+          icon={<FileText size={48} />}
+          title="Нет материалов"
+          text="Материалы появятся после парсинга источников"
+        />
       ) : (
-        <div className="stagger-children" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+        <div className="cz-flex-col cz-gap-6 stagger-children">
           {materials.map((m) => {
             const sc = statusConfig[m.status] || statusConfig.new;
             const cat = m.category ? categoryLabels[m.category] : null;
@@ -268,165 +204,115 @@ export default function MaterialsPage() {
 
             return (
               <CzCard key={m.id} interactive padding="sm">
-                <div
-                  onClick={() => setExpandedId(isExpanded ? null : m.id)}
-                  style={{ cursor: "pointer" }}
-                >
+                <div onClick={() => setExpandedId(isExpanded ? null : m.id)} style={{ cursor: "pointer" }}>
                   {/* Main row */}
-                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px", padding: "4px 0" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div className="cz-flex-between cz-items-start cz-gap-16" style={{ padding: "4px 0" }}>
+                    <div className="cz-flex-1">
+                      <div className="cz-flex cz-items-center cz-gap-8">
                         {m.is_breaking && (
-                          <span style={{
-                            display: "inline-flex", alignItems: "center", gap: "3px",
-                            padding: "1px 6px", fontSize: "10px", fontWeight: 700,
-                            borderRadius: "4px", backgroundColor: `hsl(var(--cz-error))`, color: "white",
+                          <span className="cz-flex cz-items-center cz-gap-4" style={{
+                            padding: "1px 6px", fontSize: 10, fontWeight: 700, borderRadius: 4,
+                            backgroundColor: "hsl(var(--cz-error))", color: "white",
                             textTransform: "uppercase", letterSpacing: "0.05em",
                           }}>
                             <Zap size={10} />BREAKING
                           </span>
                         )}
                         {m.is_recommended_for_channel && (
-                          <span style={{
-                            display: "inline-flex", alignItems: "center", gap: "3px",
-                            padding: "1px 6px", fontSize: "10px", fontWeight: 700,
-                            borderRadius: "4px", backgroundColor: `hsl(var(--cz-success))`, color: "white",
+                          <span className="cz-flex cz-items-center cz-gap-4" style={{
+                            padding: "1px 6px", fontSize: 10, fontWeight: 700, borderRadius: 4,
+                            backgroundColor: "hsl(var(--cz-success))", color: "white",
                             textTransform: "uppercase", letterSpacing: "0.05em",
                           }}>
                             <Sparkles size={10} />РЕКОМЕНДОВАНО
                           </span>
                         )}
-                        <span style={{
-                          fontSize: "14px", fontWeight: 500,
-                          color: `hsl(var(--cz-text-primary))`,
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        }}>
-                          {m.title}
-                        </span>
+                        <span className="cz-text-lg cz-font-medium cz-truncate">{m.title}</span>
                       </div>
 
                       {/* AI summary */}
                       {m.summary_ru && (
-                        <div style={{
-                          fontSize: "12px", color: `hsl(var(--cz-text-secondary))`,
-                          marginTop: "4px", lineHeight: "1.5",
-                          overflow: "hidden", textOverflow: "ellipsis",
-                          display: "-webkit-box", WebkitLineClamp: isExpanded ? 10 : 2,
-                          WebkitBoxOrient: "vertical",
+                        <div className="cz-text-sm cz-text-secondary" style={{
+                          marginTop: 4, lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis",
+                          display: "-webkit-box", WebkitLineClamp: isExpanded ? 10 : 2, WebkitBoxOrient: "vertical",
                         }}>
                           {m.summary_ru}
                         </div>
                       )}
 
-                      {/* Tags row */}
+                      {/* Tags */}
                       {m.tags && m.tags.length > 0 && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "6px" }}>
-                          {m.tags.slice(0, isExpanded ? 10 : 3).map((tag) => (
-                            <TagChip key={tag} tag={tag} />
-                          ))}
+                        <div className="cz-flex cz-flex-wrap cz-gap-4" style={{ marginTop: 6 }}>
+                          {m.tags.slice(0, isExpanded ? 10 : 3).map((tag) => <TagChip key={tag} tag={tag} />)}
                           {!isExpanded && m.tags.length > 3 && (
-                            <span style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))`, alignSelf: "center" }}>
-                              +{m.tags.length - 3}
-                            </span>
+                            <span className="cz-text-xs cz-text-muted" style={{ alignSelf: "center" }}>+{m.tags.length - 3}</span>
                           )}
                         </div>
                       )}
                     </div>
 
-                    {/* Right side: meta */}
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px", flexShrink: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    {/* Right meta */}
+                    <div className="cz-flex-col cz-items-end cz-gap-6 cz-flex-shrink-0">
+                      <div className="cz-flex cz-items-center cz-gap-8">
                         {cat && (
-                          <span style={{
-                            fontSize: "12px", fontWeight: 500,
-                            color: `hsl(var(--cz-text-secondary))`,
-                            display: "flex", alignItems: "center", gap: "4px",
-                          }}>
-                            <span>{cat.emoji}</span>
-                            {cat.label}
+                          <span className="cz-text-sm cz-font-medium cz-text-secondary cz-flex cz-items-center cz-gap-4">
+                            <span>{cat.emoji}</span>{cat.label}
                           </span>
                         )}
                         <CzBadge variant={sc.variant}>{sc.label}</CzBadge>
                       </div>
 
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <div className="cz-flex cz-items-center cz-gap-12">
                         {m.channel_hype_score != null && (
                           <div title="Hype Score">
-                            <span style={{ fontSize: "11px", color: "var(--cz-text-muted)" }}>Hype:</span><RelevanceBar score={m.channel_hype_score * 10} />
+                            <span className="cz-text-xs cz-text-muted">Hype:</span><RelevanceBar score={m.channel_hype_score * 10} />
                           </div>
                         )}
                         {m.channel_relevance_score != null ? (
                            <div title="Channel Relevance">
-                            <span style={{ fontSize: "11px", color: "var(--cz-text-muted)" }}>Релев:</span><RelevanceBar score={m.channel_relevance_score * 10} />
+                            <span className="cz-text-xs cz-text-muted">Релев:</span><RelevanceBar score={m.channel_relevance_score * 10} />
                            </div>
                         ) : m.relevance_score != null ? (
                           <RelevanceBar score={m.relevance_score} />
                         ) : null}
-                        {sent && (
-                          <span style={{
-                            fontSize: "11px", fontWeight: 500,
-                            color: `hsl(${sent.color})`,
-                          }}>
-                            {sent.label}
-                          </span>
-                        )}
+                        {sent && <span className="cz-text-xs cz-font-medium" style={{ color: `hsl(${sent.color})` }}>{sent.label}</span>}
                       </div>
 
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        {m.word_count && (
-                          <span style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))` }}>{m.word_count} сл.</span>
-                        )}
-                        <span style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))` }}>
-                          {new Date(m.created_at).toLocaleDateString("ru")}
-                        </span>
-                        {isExpanded ? <ChevronUp size={14} style={{ color: `hsl(var(--cz-text-muted))` }} /> : <ChevronDown size={14} style={{ color: `hsl(var(--cz-text-muted))` }} />}
+                      <div className="cz-flex cz-items-center cz-gap-8">
+                        {m.word_count && <span className="cz-text-xs cz-text-muted">{m.word_count} сл.</span>}
+                        <span className="cz-text-xs cz-text-muted">{new Date(m.created_at).toLocaleDateString("ru")}</span>
+                        {isExpanded ? <ChevronUp size={14} className="cz-text-muted" /> : <ChevronDown size={14} className="cz-text-muted" />}
                       </div>
                     </div>
                   </div>
 
-                  {/* Expanded section */}
+                  {/* Expanded */}
                   {isExpanded && (
-                    <div style={{
-                      marginTop: "12px", paddingTop: "12px",
-                      borderTop: `1px solid hsl(var(--cz-border))`,
-                      display: "flex", flexDirection: "column", gap: "8px",
+                    <div className="cz-flex-col cz-gap-8" style={{
+                      marginTop: 12, paddingTop: 12, borderTop: "1px solid hsl(var(--cz-border))",
                     }}>
                       {m.channel_explanation && (
                          <div style={{
-                          padding: "10px",
-                          borderRadius: "var(--cz-radius-md)",
-                          backgroundColor: m.is_recommended_for_channel ? `hsl(var(--cz-success) / 0.1)` : `hsl(var(--cz-warning) / 0.1)`,
-                          border: `1px solid ${m.is_recommended_for_channel ? `hsl(var(--cz-success) / 0.2)` : `hsl(var(--cz-warning) / 0.2)`}`,
-                          fontSize: "13px",
-                          lineHeight: "1.5",
-                          color: `hsl(var(--cz-text-secondary))`
+                          padding: 10, borderRadius: "var(--cz-radius-md)",
+                          backgroundColor: m.is_recommended_for_channel ? "hsl(var(--cz-success) / 0.1)" : "hsl(var(--cz-warning) / 0.1)",
+                          border: `1px solid ${m.is_recommended_for_channel ? "hsl(var(--cz-success) / 0.2)" : "hsl(var(--cz-warning) / 0.2)"}`,
+                          fontSize: 13, lineHeight: 1.5,
                          }}>
-                           <strong style={{ display: "block", marginBottom: "4px", color: m.is_recommended_for_channel ? `hsl(var(--cz-success))` : `hsl(var(--cz-warning))` }}>
+                           <strong className="cz-font-semibold" style={{
+                             display: "block", marginBottom: 4,
+                             color: m.is_recommended_for_channel ? "hsl(var(--cz-success))" : "hsl(var(--cz-warning))",
+                           }}>
                              Оценка редактора (Канал):
                            </strong>
                            {m.channel_explanation}
                          </div>
                       )}
-                      
-                      <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
-                        <a
-                          href={m.original_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          style={{
-                            fontSize: "12px", color: `hsl(var(--cz-accent))`,
-                            display: "flex", alignItems: "center", gap: "4px",
-                            textDecoration: "none",
-                          }}
-                        >
+                      <div className="cz-flex cz-items-center cz-gap-16 cz-flex-wrap">
+                        <a href={m.original_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                          className="cz-flex cz-items-center cz-gap-4 cz-text-sm" style={{ color: "hsl(var(--cz-accent))", textDecoration: "none" }}>
                           <ExternalLink size={12} /> Оригинал
                         </a>
-                        {m.classified_by && (
-                          <span style={{ fontSize: "11px", color: `hsl(var(--cz-text-muted))` }}>
-                            AI: {m.classified_by}
-                          </span>
-                        )}
+                        {m.classified_by && <span className="cz-text-xs cz-text-muted">AI: {m.classified_by}</span>}
                       </div>
                     </div>
                   )}

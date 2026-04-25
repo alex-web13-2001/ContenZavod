@@ -67,6 +67,12 @@ class Channel(Base, TenantMixin, TimestampMixin):
         Text, server_default="", nullable=False
     )
 
+    # Formatting rules — strict text formatting instructions for AI
+    # (paragraph structure, bold/emoji usage, line breaks, etc.)
+    formatting_rules: Mapped[str] = mapped_column(
+        Text, server_default="", nullable=False
+    )
+
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
 
     # Relationships
