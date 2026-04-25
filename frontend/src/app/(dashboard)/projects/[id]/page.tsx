@@ -163,6 +163,47 @@ export default function ProjectDetailPage() {
     }
   };
 
+  /* ────── Regenerate adaptations (after AI failure) ────── */
+  const [regeneratingScores, setRegeneratingScores] = useState<Record<string, boolean>>({});
+
+  const handleRegenerate = async (scoreId: string) => {
+    setRegeneratingScores((prev) => ({ ...prev, [scoreId]: true }));
+    try {
+      await api.post(`/projects/${projectId}/recommendations/${scoreId}/regenerate`);
+      showToast("🔄 AI перегенерирует адаптации...", "info");
+
+      // Poll until adaptations appear (max ~10 attempts = ~40 seconds)
+      const poll = async (attempt: number) => {
+        if (attempt > 10) {
+          setRegeneratingScores((p) => ({ ...p, [scoreId]: false }));
+          showToast("⏳ Генерация заняла слишком долго, проверьте позже", "error");
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 4000));
+        await fetchRecommendationsAndAdaptations({ silent: true });
+
+        // Check if adaptations appeared for this score's material
+        const m = materials.find((mat) => mat.id === scoreId);
+        const matId = m?.material_id || scoreId;
+        setAdaptations((current) => {
+          const matAdapts = current[matId] || [];
+          if (matAdapts.length > 0) {
+            setRegeneratingScores((p) => ({ ...p, [scoreId]: false }));
+            showToast("✅ Адаптации готовы!", "success");
+          } else {
+            poll(attempt + 1);
+          }
+          return current;
+        });
+      };
+      poll(0);
+    } catch (e) {
+      console.error(e);
+      setRegeneratingScores((p) => ({ ...p, [scoreId]: false }));
+      showToast("Ошибка при запуске перегенерации", "error");
+    }
+  };
+
   /* ────── Batch Publish (new flow) ────── */
   const [publishDialogScoreId, setPublishDialogScoreId] = useState<string | null>(null);
   const [publishingBatch, setPublishingBatch] = useState(false);
@@ -427,6 +468,8 @@ export default function ProjectDetailPage() {
           publishingBatch={publishingBatch}
           onGenerateCover={handleGenerateCover}
           generatingCovers={generatingCovers}
+          onRegenerate={handleRegenerate}
+          regeneratingScores={regeneratingScores}
         />
       )}
 

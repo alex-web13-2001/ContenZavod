@@ -51,6 +51,8 @@ interface RecommendationsTabProps {
   publishingBatch?: boolean;
   onGenerateCover?: (adaptationId: string) => void;
   generatingCovers?: Record<string, boolean>;
+  onRegenerate?: (scoreId: string) => void;
+  regeneratingScores?: Record<string, boolean>;
 }
 
 export function RecommendationsTab({
@@ -62,6 +64,7 @@ export function RecommendationsTab({
   dateFrom, setDateFrom, onPipelineAction, exitingCards,
   publishDialogScoreId, onOpenPublishDialog, onClosePublishDialog, onBatchPublish, publishingBatch,
   onGenerateCover, generatingCovers,
+  onRegenerate, regeneratingScores,
 }: RecommendationsTabProps) {
   const empty = EMPTY_STATES[pipelineStatus];
 
@@ -196,9 +199,44 @@ export function RecommendationsTab({
                       })}
                     </div>
                   ) : (
-                    <div style={{ padding: 16, textAlign: "center", color: "hsl(var(--cz-text-muted))", fontSize: 14 }}>
-                      ⏳ AI готовит адаптации для каналов...
-                    </div>
+                    (() => {
+                      const isRegenerating = regeneratingScores?.[m.id];
+                      const hasGenerating = generatingItems.length > 0;
+                      // Show regenerate button if no adaptations and not actively generating
+                      if (!hasGenerating && !isRegenerating) {
+                        return (
+                          <div style={{
+                            padding: "20px 16px", textAlign: "center",
+                            borderRadius: 10,
+                            backgroundColor: "hsl(var(--cz-error) / 0.06)",
+                            border: "1px dashed hsl(var(--cz-error) / 0.3)",
+                          }}>
+                            <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: "hsl(var(--cz-error))", marginBottom: 4 }}>
+                              AI не смог сгенерировать адаптации
+                            </div>
+                            <div style={{ fontSize: 13, color: "hsl(var(--cz-text-muted))", marginBottom: 14 }}>
+                              Произошла ошибка при обращении к AI. Попробуйте перегенерировать.
+                            </div>
+                            {onRegenerate && (
+                              <CzButton variant="primary" size="sm" icon={<Sparkles size={14} />}
+                                onClick={() => onRegenerate(m.id)}>
+                                🔄 Перегенерировать
+                              </CzButton>
+                            )}
+                          </div>
+                        );
+                      }
+                      // Actively generating or regenerating
+                      return (
+                        <div style={{
+                          padding: 16, textAlign: "center", color: "hsl(var(--cz-text-muted))", fontSize: 14,
+                          animation: "cz-pulse 2s ease-in-out infinite",
+                        }}>
+                          {isRegenerating ? "🔄 AI перегенерирует адаптации..." : "⏳ AI готовит адаптации для каналов..."}
+                        </div>
+                      );
+                    })()
                   )}
 
                   {/* Add format / language buttons */}

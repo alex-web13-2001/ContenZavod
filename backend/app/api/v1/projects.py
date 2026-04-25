@@ -403,6 +403,59 @@ async def update_recommendation_status(
     }
 
 
+@router.post("/{project_id}/recommendations/{score_id}/regenerate")
+async def regenerate_adaptations(
+    project_id: str,
+    score_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _user: str = Depends(get_current_user_id),
+):
+    """Re-trigger AI adaptation generation for a material in 'in_progress'.
+
+    Use when the initial AI generation failed and produced 0 adaptations.
+    """
+    import uuid as _uuid
+    from sqlalchemy import select
+    from app.models.project_score import MaterialProjectScore
+    from app.models.channel import Channel
+
+    tid = _uuid.UUID(tenant_id)
+    pid = _uuid.UUID(project_id)
+    sid = _uuid.UUID(score_id)
+
+    score = (await db.execute(
+        select(MaterialProjectScore).where(
+            MaterialProjectScore.id == sid,
+            MaterialProjectScore.project_id == pid,
+            MaterialProjectScore.tenant_id == tid,
+        )
+    )).scalar_one_or_none()
+
+    if not score:
+        raise HTTPException(status_code=404, detail="Score not found")
+
+    if score.editorial_status != "in_progress":
+        raise HTTPException(status_code=400, detail="Material must be in 'in_progress' to regenerate")
+
+    # Find project channels
+    channels = (await db.execute(
+        select(Channel.id).where(
+            Channel.project_id == pid,
+            Channel.is_active == True,
+        )
+    )).scalars().all()
+
+    if not channels:
+        raise HTTPException(status_code=400, detail="No active channels in project")
+
+    from workers.ai_tasks import adapt_material_for_channels
+    adapt_material_for_channels.delay(
+        str(score.material_id), str(pid), str(tid)
+    )
+
+    return {"id": str(score.id), "status": "regenerating"}
+
 @router.get("/{project_id}/categories")
 async def list_project_categories(
     project_id: str,
