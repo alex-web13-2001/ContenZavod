@@ -59,6 +59,14 @@ class PublishJob(Base, TenantMixin, TimestampMixin):
     retry_count: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Telegram post statistics
+    views: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    reactions: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    forwards: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    stats_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Idempotency key prevents duplicate publishing on retry
     idempotency_key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
 

@@ -72,6 +72,12 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute="*/15"),
         "options": {"queue": "ai_queue"},
     },
+    # Sync Telegram post stats (views, reactions, forwards) every 30 minutes
+    "sync-telegram-stats": {
+        "task": "workers.publish_tasks.sync_telegram_stats",
+        "schedule": crontab(minute="*/30"),
+        "options": {"queue": "publish_queue"},
+    },
 }
 
 # Explicitly register task modules

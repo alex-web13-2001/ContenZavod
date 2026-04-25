@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { ExternalLink, Sparkles, Zap, Check, X, ArrowRight, RotateCcw, Eye, Heart, MessageCircle, Image, Clock, Send } from "lucide-react";
+import { ExternalLink, Sparkles, Zap, Check, X, ArrowRight, RotateCcw, Eye, Heart, Share2, Image, Clock, Send } from "lucide-react";
 import { CzCard, CzBadge, CzButton } from "@/components/ui-system";
 import { Material, Adaptation, categoryLabels, formatLabels, renderMarkdownToHtml } from "./types";
 
@@ -55,6 +55,14 @@ const LANG_LABELS: Record<string, string> = {
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8010/api/v1";
+
+/** Format stats number: 0→"—", 1200→"1.2K", etc. */
+function formatStat(n: number | null | undefined): string {
+  if (n == null || n === 0) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
 
 /* ═══ 1. INBOX CARD — clean, no adaptations ═══ */
 export function InboxCard({ m, onTake, onReject }: {
@@ -298,15 +306,15 @@ export function LanguagePostCard({ ad, mode, onGenerateCover, generatingCover, o
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "hsl(var(--cz-text-muted))" }}>
             <Eye size={14} />
-            <span style={{ fontWeight: 600 }}>{stats.views ?? "—"}</span>
+            <span style={{ fontWeight: 600 }}>{formatStat(stats.views)}</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "hsl(var(--cz-text-muted))" }}>
             <Heart size={14} />
-            <span style={{ fontWeight: 600 }}>{stats.reactions ?? "—"}</span>
+            <span style={{ fontWeight: 600 }}>{formatStat(stats.reactions)}</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "hsl(var(--cz-text-muted))" }}>
-            <MessageCircle size={14} />
-            <span style={{ fontWeight: 600 }}>{stats.comments ?? "—"}</span>
+            <Share2 size={14} />
+            <span style={{ fontWeight: 600 }}>{formatStat(stats.comments)}</span>
           </div>
         </div>
       )}

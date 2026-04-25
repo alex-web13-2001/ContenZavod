@@ -250,3 +250,99 @@ class TelegramClient:
                 retryable=True,
             )
 
+    def get_message_stats(
+        self, chat_id: str, message_id: str
+    ) -> dict | None:
+        """Fetch view/reaction/forward counts for a channel post.
+
+        Uses Telegram's public embed page to scrape stats.
+        Works for public channels (chat_id like @channel_name).
+
+        Args:
+            chat_id: Channel username (e.g. "@ecocyprus") or numeric ID.
+            message_id: Telegram message ID.
+
+        Returns:
+            Dict with views, reactions, forwards or None on failure.
+        """
+        # Resolve username from chat_id
+        username = chat_id.lstrip("@") if chat_id.startswith("@") else None
+
+        if not username:
+            # Try to get channel info via Bot API for numeric chat_id
+            try:
+                url = TELEGRAM_API.format(token=self.bot_token, method="getChat")
+                with httpx.Client(timeout=10) as client:
+                    resp = client.post(url, json={"chat_id": chat_id})
+                data = resp.json()
+                if data.get("ok"):
+                    username = data["result"].get("username")
+            except Exception as e:
+                log.warning("telegram.stats.get_chat_failed", error=str(e))
+
+        if not username:
+            log.warning("telegram.stats.no_username", chat_id=chat_id)
+            return None
+
+        # Scrape the embed page
+        embed_url = f"https://t.me/{username}/{message_id}?embed=1&mode=tme"
+        try:
+            with httpx.Client(timeout=15, follow_redirects=True) as client:
+                resp = client.get(embed_url, headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; ContenZavod/1.0)"
+                })
+            html = resp.text
+
+            views = 0
+            reactions = 0
+            forwards = 0
+
+            # Parse views: <span class="tgme_widget_message_views">1.2K</span>
+            views_match = re.search(
+                r'class="tgme_widget_message_views"[^>]*>([^<]+)', html
+            )
+            if views_match:
+                views = _parse_tg_number(views_match.group(1).strip())
+
+            # Parse forwards/shares
+            forwards_match = re.search(
+                r'class="tgme_widget_message_forwards"[^>]*>([^<]+)', html
+            )
+            if forwards_match:
+                forwards = _parse_tg_number(forwards_match.group(1).strip())
+
+            # Parse reactions (sum of all emoji reactions)
+            reaction_matches = re.findall(
+                r'class="tgme_widget_message_reaction_count"[^>]*>([^<]+)', html
+            )
+            for r_text in reaction_matches:
+                reactions += _parse_tg_number(r_text.strip())
+
+            log.info(
+                "telegram.stats.scraped",
+                username=username,
+                message_id=message_id,
+                views=views,
+                reactions=reactions,
+                forwards=forwards,
+            )
+            return {"views": views, "reactions": reactions, "forwards": forwards}
+
+        except Exception as e:
+            log.warning("telegram.stats.scrape_failed", error=str(e), url=embed_url)
+            return None
+
+
+def _parse_tg_number(text: str) -> int:
+    """Parse Telegram's abbreviated numbers like '1.2K', '3.5M'."""
+    text = text.strip().replace(",", ".").upper()
+    if not text:
+        return 0
+    try:
+        if text.endswith("K"):
+            return int(float(text[:-1]) * 1000)
+        if text.endswith("M"):
+            return int(float(text[:-1]) * 1_000_000)
+        return int(float(text))
+    except (ValueError, TypeError):
+        return 0

@@ -299,10 +299,10 @@ async def list_project_recommendations(
                     "platform_post_id": job.platform_post_id,
                     "cover_image_url": adapt.cover_image_url,
                     "cover_status": adapt.cover_status,
-                    # Stats placeholders (future)
-                    "views": None,
-                    "reactions": None,
-                    "comments": None,
+                    # Telegram stats from publish job
+                    "views": job.views or 0,
+                    "reactions": job.reactions or 0,
+                    "comments": job.forwards or 0,  # forwards shown as "comments" slot
                 })
                 if not latest_pub or (job.published_at and (not latest_pub.published_at or job.published_at > latest_pub.published_at)):
                     latest_pub = job
