@@ -211,24 +211,33 @@ export default function ProjectDetailPage() {
       await api.post(`/projects/${projectId}/materials/${materialId}/generate-cover?language=ru`);
       showToast("🎨 Генерация обложки запущена", "info");
 
-      // Poll for completion
+      // Guard against duplicate toasts
+      let completed = false;
+
       const pollCover = (attempt: number) => {
+        if (completed) return;
         if (attempt > 40) {
+          completed = true;
           setGeneratingCovers((prev) => ({ ...prev, [materialId]: false }));
           showToast("⏳ Генерация обложки заняла слишком долго", "error");
           return;
         }
         setTimeout(async () => {
+          if (completed) return;
           await fetchRecommendationsAndAdaptations({ silent: true });
-          // Check if cover is ready in updated materials
+          // Read current state to check cover status
           setMaterials((currentMaterials) => {
+            if (completed) return currentMaterials;
             const mat = currentMaterials.find((m) => (m.material_id || m.id) === materialId);
             if (mat?.cover_status === "ready" || mat?.cover_status === "error") {
-              setGeneratingCovers((prev) => ({ ...prev, [materialId]: false }));
-              if (mat.cover_status === "ready") {
-                showToast("✅ Обложка готова!", "success");
-              } else {
-                showToast("❌ Ошибка генерации обложки", "error");
+              if (!completed) {
+                completed = true;
+                setGeneratingCovers((prev) => ({ ...prev, [materialId]: false }));
+                if (mat.cover_status === "ready") {
+                  showToast("✅ Обложка готова!", "success");
+                } else {
+                  showToast("❌ Ошибка генерации обложки", "error");
+                }
               }
             } else {
               pollCover(attempt + 1);

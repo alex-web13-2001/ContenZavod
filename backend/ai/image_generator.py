@@ -132,23 +132,54 @@ It should NOT be the full headline — make it punchier and shorter (3-8 words m
 
     try:
         data = resp.json()
-        message = data["choices"][0]["message"]
-        tool_calls = message.get("tool_calls", [])
+
+        # Support both OpenAI-style ("choices") and Google-native ("candidates") formats
+        message = None
+        tool_calls = []
+
+        if "choices" in data and data["choices"]:
+            message = data["choices"][0].get("message", {})
+            tool_calls = message.get("tool_calls", [])
+        elif "candidates" in data and data["candidates"]:
+            candidate = data["candidates"][0]
+            content = candidate.get("content", {})
+            parts = content.get("parts", [])
+            # Google format: parts can contain functionCall
+            for part in parts:
+                if "functionCall" in part:
+                    fc = part["functionCall"]
+                    tool_calls = [{
+                        "function": {
+                            "name": fc.get("name", ""),
+                            "arguments": json.dumps(fc.get("args", {})),
+                        }
+                    }]
+                    break
+                elif "text" in part:
+                    message = {"content": part["text"]}
+        else:
+            # Log the unexpected format for debugging
+            logger.error("image.gemini_unknown_format", keys=list(data.keys()), snippet=str(data)[:300])
+            raise ImageGenerationError(f"Unknown Gemini response format: keys={list(data.keys())}")
 
         if tool_calls:
-            args = json.loads(tool_calls[0]["function"]["arguments"])
+            args = json.loads(tool_calls[0]["function"]["arguments"]) if isinstance(tool_calls[0]["function"]["arguments"], str) else tool_calls[0]["function"]["arguments"]
             return {
                 "prompt": args.get("prompt", ""),
                 "overlay_text": args.get("overlay_text", ""),
             }
 
         # Fallback: try content
-        content = message.get("content", "")
-        if content:
-            return {"prompt": content, "overlay_text": ""}
+        if message:
+            content = message.get("content", "")
+            if content:
+                return {"prompt": content, "overlay_text": ""}
 
         raise ImageGenerationError("Gemini returned no tool calls or content")
-    except (KeyError, IndexError, json.JSONDecodeError) as e:
+    except ImageGenerationError:
+        raise
+    except (KeyError, IndexError, json.JSONDecodeError, TypeError) as e:
+        logger.error("image.gemini_parse_error", error=str(e), snippet=str(resp.text)[:300])
         raise ImageGenerationError(f"Failed to parse Gemini response: {e}")
 
 
