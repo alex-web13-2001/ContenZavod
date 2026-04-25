@@ -64,7 +64,13 @@ class PublishService:
         bot_token, chat_id = self._validate_config(channel, language=adaptation.language)
         message_html = self._format_message(adaptation, bot_token)
 
-        result = self._send(bot_token, chat_id, message_html)
+        # Check for cover image on the material
+        cover_data = self._get_cover_image(adaptation.material_id)
+
+        if cover_data:
+            result = self._send_with_photo(bot_token, chat_id, message_html, cover_data)
+        else:
+            result = self._send(bot_token, chat_id, message_html)
 
         self._mark_published(job, adaptation, result, chat_id)
         return result
@@ -175,6 +181,88 @@ class PublishService:
             headline=adaptation.headline or "",
             body=adaptation.body or "",
         )
+
+    def _get_cover_image(self, material_id) -> bytes | None:
+        """Try to load cover image from MinIO for this material.
+
+        Returns image bytes if a cover exists, None otherwise.
+        """
+        from app.models.material import RawMaterial
+
+        material = self.session.get(RawMaterial, material_id)
+        if not material:
+            return None
+
+        meta = material.metadata_ or {}
+        cover_info = meta.get("cover_image", {})
+        cover_url = cover_info.get("url", "")
+
+        if not cover_url or meta.get("cover_status") != "ready":
+            return None
+
+        # Extract MinIO object name from URL like /api/v1/files/covers/xxx.png
+        object_name = cover_url.replace("/api/v1/files/", "")
+        if not object_name:
+            return None
+
+        try:
+            from app.services.storage import get_file_bytes
+            data, _ct = get_file_bytes(object_name)
+            log.info("publish.cover_loaded", object_name=object_name, size=len(data))
+            return data
+        except Exception as e:
+            log.warning("publish.cover_load_failed", error=str(e))
+            return None
+
+    def _send_with_photo(
+        self, bot_token: str, chat_id: str, html_text: str, photo_data: bytes
+    ) -> dict:
+        """Send a photo with caption via Telegram.
+
+        If the message is too long for a caption (>1024 chars), sends photo
+        first, then a follow-up text message.
+
+        Args:
+            bot_token: Telegram bot token.
+            chat_id: Target chat/channel ID.
+            html_text: Formatted message.
+            photo_data: Cover image bytes.
+
+        Returns:
+            Dict with message_id and raw_response.
+
+        Raises:
+            PublishRetryError: On transient failures.
+            PublishError: On permanent failures.
+        """
+        client = TelegramClient(bot_token)
+
+        if len(html_text) <= 1024:
+            # Fits in photo caption — send as single message
+            result = client.send_photo(chat_id, photo_data, html_text)
+        else:
+            # Too long for caption — send photo with short caption, then full text
+            # Take first paragraph as caption
+            short = html_text[:1021] + "..."
+            result = client.send_photo(chat_id, photo_data, short)
+
+            if result.success:
+                # Send remaining text as follow-up (not critical if fails)
+                try:
+                    client.send_message(chat_id, html_text)
+                except Exception:
+                    log.warning("publish.followup_text_failed", chat_id=chat_id)
+
+        if result.success:
+            return {
+                "message_id": result.message_id,
+                "raw_response": result.raw_response,
+            }
+
+        if result.retryable:
+            raise PublishRetryError(result.error)
+
+        raise PublishError(result.error)
 
     def _send(self, bot_token: str, chat_id: str, html_text: str) -> dict:
         """Send the message via Telegram.

@@ -168,3 +168,85 @@ class TelegramClient:
                 error=str(e),
                 retryable=True,
             )
+
+    def send_photo(
+        self,
+        chat_id: str,
+        photo_data: bytes,
+        caption: str,
+        filename: str = "cover.png",
+    ) -> TelegramSendResult:
+        """Send a photo with caption to a Telegram chat/channel.
+
+        Args:
+            chat_id: Target chat ID (@channel_name or numeric ID).
+            photo_data: Raw image bytes.
+            caption: HTML-formatted caption text (max 1024 chars).
+            filename: Filename for the upload.
+
+        Returns:
+            TelegramSendResult with success status and message_id or error.
+        """
+        url = TELEGRAM_API.format(token=self.bot_token, method="sendPhoto")
+
+        # Telegram photo caption limit is 1024 chars
+        if len(caption) > 1024:
+            caption = caption[:1021] + "..."
+
+        log.info(
+            "telegram.sending_photo",
+            chat_id=chat_id,
+            caption_len=len(caption),
+            photo_size=len(photo_data),
+        )
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.post(
+                    url,
+                    data={
+                        "chat_id": chat_id,
+                        "caption": caption,
+                        "parse_mode": "HTML",
+                    },
+                    files={
+                        "photo": (filename, photo_data, "image/png"),
+                    },
+                )
+
+            data = resp.json()
+
+            if resp.status_code == 200 and data.get("ok"):
+                message = data["result"]
+                message_id = str(message.get("message_id", ""))
+                log.info("telegram.photo_sent", chat_id=chat_id, message_id=message_id)
+                return TelegramSendResult(
+                    success=True,
+                    message_id=message_id,
+                    raw_response=data,
+                )
+
+            error_msg = data.get("description", str(data))
+            retryable = resp.status_code in (429, 500, 502, 503)
+            log.error(
+                "telegram.photo_api_error",
+                chat_id=chat_id,
+                error=error_msg,
+                status_code=resp.status_code,
+            )
+            return TelegramSendResult(
+                success=False,
+                error=error_msg,
+                status_code=resp.status_code,
+                raw_response=data,
+                retryable=retryable,
+            )
+
+        except httpx.HTTPError as e:
+            log.error("telegram.photo_http_error", error=str(e))
+            return TelegramSendResult(
+                success=False,
+                error=str(e),
+                retryable=True,
+            )
+
