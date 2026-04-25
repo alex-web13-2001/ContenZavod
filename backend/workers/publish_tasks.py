@@ -97,12 +97,16 @@ def sync_telegram_stats(self):
         log.info("stats.sync.start", job_count=len(jobs))
 
         # Group by channel to reuse TelegramClient
-        channel_cache: dict[str, tuple[str, str]] = {}  # channel_id → (bot_token, chat_id)
+        # Group by channel+language to reuse TelegramClient
+        channel_cache: dict[str, tuple[str, str]] = {}  # channel_id:lang → (bot_token, chat_id)
         updated = 0
 
         for job in jobs:
             try:
-                ch_key = str(job.channel_id)
+                # Resolve the adaptation's language first for cache key
+                adaptation = session.get(ChannelAdaptation, job.content_id)
+                lang = adaptation.language if adaptation else None
+                ch_key = f"{job.channel_id}:{lang or 'default'}"
 
                 if ch_key not in channel_cache:
                     channel = session.get(Channel, job.channel_id)
@@ -111,9 +115,7 @@ def sync_telegram_stats(self):
                     config = channel.config or {}
                     bot_token = config.get("bot_token", "")
 
-                    # Resolve chat_id for the adaptation's language
-                    adaptation = session.get(ChannelAdaptation, job.content_id)
-                    lang = adaptation.language if adaptation else None
+                    # Resolve chat_id for this specific language
                     chat_id = ""
                     endpoints = config.get("endpoints", {})
                     if lang and lang in endpoints:
