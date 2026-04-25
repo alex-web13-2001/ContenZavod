@@ -133,6 +133,11 @@ It should NOT be the full headline — make it punchier and shorter (3-8 words m
     try:
         data = resp.json()
 
+        # Handle KIE API wrapper errors (e.g. maintenance mode)
+        if "code" in data and data.get("code") != 200 and "choices" not in data and "candidates" not in data:
+            msg = data.get("msg", "Unknown KIE error")
+            raise ImageGenerationError(f"KIE API error ({data.get('code')}): {msg}")
+
         # Support both OpenAI-style ("choices") and Google-native ("candidates") formats
         message = None
         tool_calls = []
