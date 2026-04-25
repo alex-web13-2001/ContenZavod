@@ -253,20 +253,21 @@ class TelegramClient:
     def get_message_stats(
         self, chat_id: str, message_id: str
     ) -> dict | None:
-        """Fetch view/reaction/forward counts for a channel post.
+        """Fetch view/reaction/forward/comment counts for a channel post.
 
-        Uses Telegram's public embed page to scrape stats.
-        Works for public channels (chat_id like @channel_name).
+        Uses Telegram's public embed page to scrape views, reactions, forwards.
+        Uses Bot API to count comments via linked discussion group.
 
         Args:
             chat_id: Channel username (e.g. "@ecocyprus") or numeric ID.
             message_id: Telegram message ID.
 
         Returns:
-            Dict with views, reactions, forwards or None on failure.
+            Dict with views, reactions, forwards, comments or None on failure.
         """
         # Resolve username from chat_id
         username = chat_id.lstrip("@") if chat_id.startswith("@") else None
+        linked_chat_id = None
 
         if not username:
             # Try to get channel info via Bot API for numeric chat_id
@@ -277,6 +278,7 @@ class TelegramClient:
                 data = resp.json()
                 if data.get("ok"):
                     username = data["result"].get("username")
+                    linked_chat_id = data["result"].get("linked_chat_id")
             except Exception as e:
                 log.warning("telegram.stats.get_chat_failed", error=str(e))
 
@@ -296,6 +298,7 @@ class TelegramClient:
             views = 0
             reactions = 0
             forwards = 0
+            comments = 0
 
             # Parse views: <span class="tgme_widget_message_views">1.2K</span>
             views_match = re.search(
@@ -311,12 +314,30 @@ class TelegramClient:
             if forwards_match:
                 forwards = _parse_tg_number(forwards_match.group(1).strip())
 
-            # Parse reactions (sum of all emoji reactions)
+            # Parse reactions — actual HTML structure:
+            # <span class="tgme_reaction"><i class="emoji">😢</i>1</span>
+            # Sum all reaction counts across all emoji types
             reaction_matches = re.findall(
-                r'class="tgme_widget_message_reaction_count"[^>]*>([^<]+)', html
+                r'class="tgme_reaction"[^>]*>.*?</i>\s*(\d[\d.,KkMm]*)\s*</span>',
+                html, re.DOTALL
             )
             for r_text in reaction_matches:
                 reactions += _parse_tg_number(r_text.strip())
+
+            # If no individual reactions found, try alternative format
+            # Some embeds use: <span class="tgme_widget_message_reactions">
+            if reactions == 0:
+                alt_match = re.findall(
+                    r'class="tgme_reaction"[^>]*>[^<]*<[^>]*>[^<]*</[^>]*>\s*'
+                    r'(\d[\d.,KkMm]*)',
+                    html
+                )
+                for r_text in alt_match:
+                    reactions += _parse_tg_number(r_text.strip())
+
+            # Try to get comment count via Bot API
+            # Telegram channels with discussion groups have comments
+            comments = self._get_comment_count(chat_id, message_id)
 
             log.info(
                 "telegram.stats.scraped",
@@ -325,12 +346,75 @@ class TelegramClient:
                 views=views,
                 reactions=reactions,
                 forwards=forwards,
+                comments=comments,
             )
-            return {"views": views, "reactions": reactions, "forwards": forwards}
+            return {
+                "views": views,
+                "reactions": reactions,
+                "forwards": forwards,
+                "comments": comments,
+            }
 
         except Exception as e:
             log.warning("telegram.stats.scrape_failed", error=str(e), url=embed_url)
             return None
+
+    def _get_comment_count(self, chat_id: str, message_id: str) -> int:
+        """Get comment count for a channel post via Bot API.
+
+        Uses getChat to find linked discussion group, then
+        checks the message's reply thread for replies.
+
+        Args:
+            chat_id: Channel chat ID or @username.
+            message_id: Message ID in the channel.
+
+        Returns:
+            Number of comments (0 if no discussion group or error).
+        """
+        try:
+            # Get the channel info to find linked discussion group
+            url = TELEGRAM_API.format(token=self.bot_token, method="getChat")
+            with httpx.Client(timeout=10) as client:
+                resp = client.post(url, json={"chat_id": chat_id})
+            data = resp.json()
+
+            if not data.get("ok"):
+                return 0
+
+            linked_chat_id = data["result"].get("linked_chat_id")
+            if not linked_chat_id:
+                return 0  # No discussion group linked
+
+            # Use getChatMemberCount as a proxy — not ideal
+            # Better: use forwardMessage trick or getForumTopicIconStickers
+            # For now, we can try getUpdates on the discussion group
+            # Actually, the best approach: use Telegram's web embed
+            # for the discussion group to count replies
+            discuss_url = (
+                f"https://t.me/{chat_id.lstrip('@')}/{message_id}"
+                f"?comment=1&embed=1&mode=tme"
+            )
+            with httpx.Client(timeout=10, follow_redirects=True) as client:
+                resp = client.get(discuss_url, headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; ContenZavod/1.0)"
+                })
+
+            # Look for comment count in the embed
+            # Structure: <a class="tgme_widget_message_comments">Leave a comment</a>
+            # or: <span class="tgme_widget_message_comments_count">5</span>
+            comment_match = re.search(
+                r'comments["\s][^>]*>(\d[\d.,KkMm]*)\s*(?:comment|комментар)',
+                resp.text, re.IGNORECASE
+            )
+            if comment_match:
+                return _parse_tg_number(comment_match.group(1))
+
+            return 0
+
+        except Exception as e:
+            log.debug("telegram.stats.comments_failed", error=str(e))
+            return 0
 
 
 def _parse_tg_number(text: str) -> int:

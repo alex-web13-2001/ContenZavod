@@ -63,6 +63,7 @@ class PublishJob(Base, TenantMixin, TimestampMixin):
     views: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
     reactions: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
     forwards: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
+    comments: Mapped[int] = mapped_column(Integer, server_default="0", nullable=False)
     stats_updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

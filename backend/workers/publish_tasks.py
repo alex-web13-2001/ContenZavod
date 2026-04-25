@@ -134,6 +134,7 @@ def sync_telegram_stats(self):
                     job.views = stats["views"]
                     job.reactions = stats["reactions"]
                     job.forwards = stats["forwards"]
+                    job.comments = stats["comments"]
                     job.stats_updated_at = datetime.now(timezone.utc)
                     updated += 1
 

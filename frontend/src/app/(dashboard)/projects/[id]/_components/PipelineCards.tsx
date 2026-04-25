@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { ExternalLink, Sparkles, Zap, Check, X, ArrowRight, RotateCcw, Eye, Heart, Share2, Image, Clock, Send } from "lucide-react";
+import { ExternalLink, Sparkles, Zap, Check, X, ArrowRight, RotateCcw, Eye, Heart, Share2, MessageCircle, Image, Clock, Send } from "lucide-react";
 import { CzCard, CzBadge, CzButton } from "@/components/ui-system";
 import { Material, Adaptation, categoryLabels, formatLabels, renderMarkdownToHtml } from "./types";
 
@@ -135,7 +135,7 @@ interface LanguagePostCardProps {
   onGenerateCover?: (adaptationId: string) => void;
   generatingCover?: boolean;
   onAction?: (id: string, action: "approved" | "rejected") => void;
-  stats?: { views?: number | null; reactions?: number | null; comments?: number | null };
+  stats?: { views?: number | null; reactions?: number | null; forwards?: number | null; comments?: number | null };
 }
 
 export function LanguagePostCard({ ad, mode, onGenerateCover, generatingCover, onAction, stats }: LanguagePostCardProps) {
@@ -300,7 +300,7 @@ export function LanguagePostCard({ ad, mode, onGenerateCover, generatingCover, o
 
       {mode === "published" && stats && (
         <div style={{
-          display: "flex", alignItems: "center", gap: 16,
+          display: "flex", alignItems: "center", gap: 14,
           padding: "8px 16px 12px",
           borderTop: "1px solid hsl(var(--cz-border) / 0.2)",
         }}>
@@ -313,8 +313,12 @@ export function LanguagePostCard({ ad, mode, onGenerateCover, generatingCover, o
             <span style={{ fontWeight: 600 }}>{formatStat(stats.reactions)}</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "hsl(var(--cz-text-muted))" }}>
-            <Share2 size={14} />
+            <MessageCircle size={14} />
             <span style={{ fontWeight: 600 }}>{formatStat(stats.comments)}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: "hsl(var(--cz-text-muted))" }}>
+            <Share2 size={14} />
+            <span style={{ fontWeight: 600 }}>{formatStat(stats.forwards)}</span>
           </div>
         </div>
       )}
@@ -337,6 +341,7 @@ interface PublishedPost {
   platform_post_id: string | null;
   views: number | null;
   reactions: number | null;
+  forwards: number | null;
   comments: number | null;
   cover_image_url?: string | null;
   cover_status?: string | null;
