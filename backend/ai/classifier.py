@@ -76,11 +76,17 @@ CLASSIFY_TOOL = {
                     "type": "boolean",
                     "description": "True if this is breaking/urgent news that should be published immediately",
                 },
+                "key_entities": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "10-15 key factual entities from this article for deduplication. Include: specific person names, organization names, place names, exact numbers/amounts, specific dates, law/bill names, event names. Must be normalized (e.g. 'European Union' not 'EU', 'Nikos Christodoulides' not 'president'). Lowercase.",
+                },
             },
             "required": [
                 "category", "subcategory", "tags",
                 "summary_ru", "summary_en",
                 "relevance_score", "sentiment", "is_breaking",
+                "key_entities",
             ],
         },
     },
@@ -96,6 +102,7 @@ Rules:
 - Tags should be specific and useful for search (e.g. "IMF", "oil prices", "Strait of Hormuz", not generic like "news")
 - relevance_score: 90-100 for Cyprus-specific news, 70-89 for regional (Middle East, EU), 50-69 for world news affecting Cyprus, <50 for distant world news
 - is_breaking: only for truly urgent events (wars, earthquakes, major political changes)
+- key_entities: Extract 10-15 specific factual entities for deduplication. Focus on proper nouns, exact figures, dates, and named events. Normalize names (full names, not abbreviations). All lowercase.
 
 Always call the classify_article tool with your analysis."""
 
