@@ -36,6 +36,11 @@ celery_app.conf.update(
         "workers.publish_tasks.*": {"queue": "publish_queue"},
         "workers.media_tasks.*": {"queue": "media_queue"},
         "workers.analytics_tasks.*": {"queue": "analytics_queue"},
+        # Autopilot routes per-task (mixed queues)
+        "workers.autopilot_tasks.autopilot_rank_and_queue": {"queue": "ai_queue"},
+        "workers.autopilot_tasks.autopilot_publish_next": {"queue": "publish_queue"},
+        "workers.autopilot_tasks.autopilot_retry_covers": {"queue": "media_queue"},
+        "workers.autopilot_tasks.autopilot_expire_stale": {"queue": "ai_queue"},
     },
 
     # Default queue
@@ -78,6 +83,31 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute="*/30"),
         "options": {"queue": "publish_queue"},
     },
+    # === AUTOPILOT TASKS ===
+    # Rank and queue new adaptations every 15 minutes
+    "autopilot-rank-and-queue": {
+        "task": "workers.autopilot_tasks.autopilot_rank_and_queue",
+        "schedule": crontab(minute="*/15"),
+        "options": {"queue": "ai_queue"},
+    },
+    # Publish next item from queue every 5 minutes
+    "autopilot-publish-next": {
+        "task": "workers.autopilot_tasks.autopilot_publish_next",
+        "schedule": crontab(minute="*/5"),
+        "options": {"queue": "publish_queue"},
+    },
+    # Retry failed cover generations every 10 minutes
+    "autopilot-retry-covers": {
+        "task": "workers.autopilot_tasks.autopilot_retry_covers",
+        "schedule": crontab(minute="*/10"),
+        "options": {"queue": "media_queue"},
+    },
+    # Expire stale queue items every hour
+    "autopilot-expire-stale": {
+        "task": "workers.autopilot_tasks.autopilot_expire_stale",
+        "schedule": crontab(minute=0),
+        "options": {"queue": "ai_queue"},
+    },
 }
 
 # Explicitly register task modules
@@ -85,4 +115,5 @@ celery_app.conf.include = [
     "workers.scrape_tasks",
     "workers.ai_tasks",
     "workers.publish_tasks",
+    "workers.autopilot_tasks",
 ]

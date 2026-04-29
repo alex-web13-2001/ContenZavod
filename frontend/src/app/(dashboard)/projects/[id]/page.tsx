@@ -4,17 +4,19 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { CzPageHeader, CzTabs, CzSkeleton, useToast } from "@/components/ui-system";
-import { ArrowLeft, Sparkles, Send, Settings } from "lucide-react";
+import { ArrowLeft, Sparkles, Send, Settings, Bot } from "lucide-react";
 import Link from "next/link";
 
 import { Project, Channel, Material, Adaptation, PipelineCounts } from "./_components/types";
 import { RecommendationsTab } from "./_components/RecommendationsTab";
 import { ChannelsTab } from "./_components/ChannelsTab";
 import { SettingsTab } from "./_components/SettingsTab";
+import { AutopilotTab } from "./_components/AutopilotTab";
 
 const TAB_OPTIONS = [
   { key: "recommendations" as const, label: "Рекомендации", icon: Sparkles },
   { key: "channels" as const, label: "Каналы", icon: Send },
+  { key: "autopilot" as const, label: "Автопилот", icon: Bot },
   { key: "settings" as const, label: "Настройки", icon: Settings },
 ];
 
@@ -29,7 +31,7 @@ export default function ProjectDetailPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [adaptations, setAdaptations] = useState<Record<string, Adaptation[]>>({});
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"recommendations" | "channels" | "settings">("recommendations");
+  const [tab, setTab] = useState<"recommendations" | "channels" | "autopilot" | "settings">("recommendations");
   const [onlyRecommended, setOnlyRecommended] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState("");
   const [availableCategories, setAvailableCategories] = useState<{ category: string; count: number }[]>([]);
@@ -481,6 +483,8 @@ export default function ProjectDetailPage() {
           onDeleteChannel={handleDeleteChannel}
         />
       )}
+
+      {tab === "autopilot" && <AutopilotTab projectId={projectId} />}
 
       {tab === "settings" && <SettingsTab project={project} onSave={handleSaveProject} />}
     </div>

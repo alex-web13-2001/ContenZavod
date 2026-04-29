@@ -11,6 +11,7 @@ from app.api.v1.projects import router as projects_router
 from app.api.v1.sources import router as sources_router
 from app.api.v1.adaptations import router as adaptations_router
 from app.api.v1.files import router as files_router
+from app.api.v1.autopilot import router as autopilot_router
 
 api_router = APIRouter()
 
@@ -23,4 +24,5 @@ api_router.include_router(projects_router)
 api_router.include_router(channels_router)
 api_router.include_router(adaptations_router)
 api_router.include_router(files_router)
+api_router.include_router(autopilot_router)
 
