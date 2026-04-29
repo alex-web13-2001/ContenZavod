@@ -76,19 +76,13 @@ class ImageGenerationError(Exception):
     pass
 
 
-async def generate_image_prompt(
+async def _generate_prompt_via_gemini(
     headline: str,
     summary: str,
     language: str = "ru",
     content_text: str = "",
 ) -> dict[str, str]:
-    """Use Gemini to create an optimal image prompt based on news context.
-    
-    Returns: {"prompt": "...", "overlay_text": "..."}
-    """
-    if not KIE_API_KEY:
-        raise ImageGenerationError("No KIE API key configured")
-
+    """Use KIE Gemini to create an optimal image prompt. May raise on API issues."""
     lang_name = LANGUAGE_NAMES.get(language, language)
     
     user_message = f"""Create a photorealistic cover image prompt for this news article.
@@ -121,71 +115,140 @@ It should NOT be the full headline — make it punchier and shorter (3-8 words m
         "Authorization": f"Bearer {KIE_API_KEY}",
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(GEMINI_URL, headers=headers, json=payload)
-    except httpx.RequestError as e:
-        raise ImageGenerationError(f"Gemini request failed: {e}")
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(GEMINI_URL, headers=headers, json=payload)
 
     if resp.status_code != 200:
         raise ImageGenerationError(f"Gemini HTTP {resp.status_code}: {resp.text[:200]}")
 
+    data = resp.json()
+
+    # Handle KIE API wrapper errors (e.g. maintenance mode)
+    if "code" in data and data.get("code") != 200 and "choices" not in data and "candidates" not in data:
+        msg = data.get("msg", "Unknown KIE error")
+        raise ImageGenerationError(f"KIE API error ({data.get('code')}): {msg}")
+
+    # Support both OpenAI-style ("choices") and Google-native ("candidates") formats
+    message = None
+    tool_calls = []
+
+    if "choices" in data and data["choices"]:
+        message = data["choices"][0].get("message", {})
+        tool_calls = message.get("tool_calls", [])
+    elif "candidates" in data and data["candidates"]:
+        candidate = data["candidates"][0]
+        content = candidate.get("content", {})
+        parts = content.get("parts", [])
+        for part in parts:
+            if "functionCall" in part:
+                fc = part["functionCall"]
+                tool_calls = [{
+                    "function": {
+                        "name": fc.get("name", ""),
+                        "arguments": json.dumps(fc.get("args", {})),
+                    }
+                }]
+                break
+            elif "text" in part:
+                message = {"content": part["text"]}
+    else:
+        logger.error("image.gemini_unknown_format", keys=list(data.keys()), snippet=str(data)[:300])
+        raise ImageGenerationError(f"Unknown Gemini response format: keys={list(data.keys())}")
+
+    if tool_calls:
+        args = json.loads(tool_calls[0]["function"]["arguments"]) if isinstance(tool_calls[0]["function"]["arguments"], str) else tool_calls[0]["function"]["arguments"]
+        return {
+            "prompt": args.get("prompt", ""),
+            "overlay_text": args.get("overlay_text", ""),
+        }
+
+    if message:
+        content = message.get("content", "")
+        if content:
+            return {"prompt": content, "overlay_text": ""}
+
+    raise ImageGenerationError("Gemini returned no tool calls or content")
+
+
+def _generate_prompt_fallback(
+    headline: str,
+    summary: str,
+    language: str = "ru",
+) -> dict[str, str]:
+    """Build a high-quality image prompt without AI when KIE Gemini is unavailable.
+
+    Uses the headline/summary to create a cinematic, photorealistic prompt
+    that GPT Image-2 can work with directly.
+    """
+    lang_name = LANGUAGE_NAMES.get(language, language)
+
+    # Build a descriptive scene prompt from headline context
+    prompt = (
+        f"A photorealistic, cinematic wide-angle (16:9) news cover image. "
+        f"The scene visually represents the following news story: \"{headline}\". "
+        f"Context: {summary[:500]}. "
+        f"Style: dramatic lighting, vivid colors, shallow depth of field, "
+        f"professional editorial photography, ultra high quality. "
+        f"The image should feel like a premium magazine cover or a top-tier news outlet header. "
+        f"No watermarks, no stock photo elements, no logos."
+    )
+
+    # Derive short overlay text from headline (first meaningful words)
+    words = headline.split()
+    overlay = " ".join(words[:6]) + ("…" if len(words) > 6 else "")
+
+    logger.info(
+        "image.prompt_fallback_used",
+        language=language,
+        headline_len=len(headline),
+    )
+
+    return {"prompt": prompt, "overlay_text": overlay}
+
+
+async def generate_image_prompt(
+    headline: str,
+    summary: str,
+    language: str = "ru",
+    content_text: str = "",
+) -> dict[str, str]:
+    """Generate an image prompt — tries KIE Gemini first, falls back to templates.
+
+    Returns: {"prompt": "...", "overlay_text": "..."}
+    """
+    if not KIE_API_KEY:
+        raise ImageGenerationError("No KIE API key configured")
+
+    # Try KIE Gemini first
     try:
-        data = resp.json()
-
-        # Handle KIE API wrapper errors (e.g. maintenance mode)
-        if "code" in data and data.get("code") != 200 and "choices" not in data and "candidates" not in data:
-            msg = data.get("msg", "Unknown KIE error")
-            raise ImageGenerationError(f"KIE API error ({data.get('code')}): {msg}")
-
-        # Support both OpenAI-style ("choices") and Google-native ("candidates") formats
-        message = None
-        tool_calls = []
-
-        if "choices" in data and data["choices"]:
-            message = data["choices"][0].get("message", {})
-            tool_calls = message.get("tool_calls", [])
-        elif "candidates" in data and data["candidates"]:
-            candidate = data["candidates"][0]
-            content = candidate.get("content", {})
-            parts = content.get("parts", [])
-            # Google format: parts can contain functionCall
-            for part in parts:
-                if "functionCall" in part:
-                    fc = part["functionCall"]
-                    tool_calls = [{
-                        "function": {
-                            "name": fc.get("name", ""),
-                            "arguments": json.dumps(fc.get("args", {})),
-                        }
-                    }]
-                    break
-                elif "text" in part:
-                    message = {"content": part["text"]}
-        else:
-            # Log the unexpected format for debugging
-            logger.error("image.gemini_unknown_format", keys=list(data.keys()), snippet=str(data)[:300])
-            raise ImageGenerationError(f"Unknown Gemini response format: keys={list(data.keys())}")
-
-        if tool_calls:
-            args = json.loads(tool_calls[0]["function"]["arguments"]) if isinstance(tool_calls[0]["function"]["arguments"], str) else tool_calls[0]["function"]["arguments"]
-            return {
-                "prompt": args.get("prompt", ""),
-                "overlay_text": args.get("overlay_text", ""),
-            }
-
-        # Fallback: try content
-        if message:
-            content = message.get("content", "")
-            if content:
-                return {"prompt": content, "overlay_text": ""}
-
-        raise ImageGenerationError("Gemini returned no tool calls or content")
-    except ImageGenerationError:
-        raise
-    except (KeyError, IndexError, json.JSONDecodeError, TypeError) as e:
-        logger.error("image.gemini_parse_error", error=str(e), snippet=str(resp.text)[:300])
-        raise ImageGenerationError(f"Failed to parse Gemini response: {e}")
+        result = await _generate_prompt_via_gemini(
+            headline=headline,
+            summary=summary,
+            language=language,
+            content_text=content_text,
+        )
+        return result
+    except ImageGenerationError as e:
+        # If Gemini is down (maintenance, 500, etc.), use fallback
+        logger.warning(
+            "image.gemini_unavailable_using_fallback",
+            error=str(e)[:120],
+        )
+        return _generate_prompt_fallback(
+            headline=headline,
+            summary=summary,
+            language=language,
+        )
+    except httpx.RequestError as e:
+        logger.warning(
+            "image.gemini_network_error_using_fallback",
+            error=str(e)[:120],
+        )
+        return _generate_prompt_fallback(
+            headline=headline,
+            summary=summary,
+            language=language,
+        )
 
 
 # ── GPT Image-2 via KIE.ai ───────────────────────────────
