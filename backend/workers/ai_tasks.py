@@ -86,6 +86,11 @@ def classify_material(self, material_id: str, tenant_id: str):
         meta["classified_at"] = datetime.now(timezone.utc).isoformat()
         meta["classified_by"] = "gemini-3-pro"
 
+        # Save semantic fingerprint for deduplication (Phase 2)
+        key_entities = result.get("key_entities", [])
+        if key_entities:
+            meta["semantic_fingerprint"] = [e.lower().strip() for e in key_entities if e]
+
         material.metadata_ = meta
         material.status = "classified"
         session.commit()
@@ -608,7 +613,7 @@ def generate_cover_image(self, material_id: str, tenant_id: str, language: str =
 @shared_task(
     bind=True,
     name="workers.ai_tasks.generate_adaptation_cover",
-    max_retries=2,
+    max_retries=5,
     queue="media_queue",
 )
 def generate_adaptation_cover(self, adaptation_id: str, tenant_id: str):
@@ -660,12 +665,14 @@ def generate_adaptation_cover(self, adaptation_id: str, tenant_id: str):
         except ImageGenerationError as e:
             log.error("image.adaptation.failed", error=str(e))
             adaptation.cover_status = "error"
+            adaptation.cover_last_error = str(e)
             session.commit()
-            raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+            raise self.retry(exc=e, countdown=180 * (self.request.retries + 1))
 
         if not result or not result.get("image_url"):
             log.error("image.adaptation.no_url")
             adaptation.cover_status = "error"
+            adaptation.cover_last_error = "no_image_url"
             session.commit()
             return {"status": "error", "reason": "no_image_url"}
 
