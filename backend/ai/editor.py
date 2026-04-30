@@ -1,7 +1,8 @@
 """AI Editor service — evaluates materials for projects.
 
-Uses Gemini 3.1 Pro via KIE.ai to generate hype and relevance scores
-based on project-specific topic guidelines and target audience.
+Uses Gemini 3.1 Pro via KIE.ai with Claude Haiku 4.5 fallback.
+Generates hype and relevance scores based on project-specific
+topic guidelines and target audience.
 """
 
 import json
@@ -15,8 +16,9 @@ from app.config import get_settings
 logger = structlog.get_logger()
 settings = get_settings()
 
-KIE_API_URL = "https://api.kie.ai/gemini-3.1-pro/v1/chat/completions"
 KIE_API_KEY = settings.kie_api_key
+GEMINI_URL = "https://api.kie.ai/gemini-3.1-pro/v1/chat/completions"
+CLAUDE_URL = "https://api.kie.ai/claude/v1/messages"
 
 SYSTEM_PROMPT = """You are an expert Chief Editor for a news/content project.
 Your job is to evaluate incoming raw materials and determine how perfectly they
@@ -35,6 +37,7 @@ You MUST provide a short 1-2 sentence explanation in the SAME LANGUAGE as the ma
 Always call the evaluate_material tool with your analysis.
 """
 
+# OpenAI-compatible tool schema (for Gemini via KIE)
 EVALUATE_TOOL = {
     "type": "function",
     "function": {
@@ -65,21 +68,24 @@ EVALUATE_TOOL = {
     },
 }
 
+# Anthropic tool schema (for Claude via KIE)
+EVALUATE_TOOL_CLAUDE = {
+    "name": "evaluate_material",
+    "description": "Evaluate a material's fitness for a specific project",
+    "input_schema": EVALUATE_TOOL["function"]["parameters"],
+}
+
 
 class AIServiceTemporarilyUnavailable(Exception):
     """Raised when the AI API is temporarily unavailable (maintenance, rate limit)."""
     pass
 
 
-async def evaluate_material_for_project(
+def _build_user_message(
     material_data: dict[str, Any], topic_guidelines: str, target_audience: str
-) -> dict[str, Any] | None:
-    """Evaluate a single material against a project's guidelines using Gemini 3.1 Pro."""
-    if not KIE_API_KEY:
-        logger.error("ai.evaluate.no_api_key")
-        return None
-
-    user_message = f"""Evaluate this material for the content project.
+) -> str:
+    """Build the user prompt for material evaluation."""
+    return f"""Evaluate this material for the content project.
     
 --- PROJECT PROFILE ---
 Topic Guidelines: {topic_guidelines}
@@ -94,6 +100,16 @@ Tags: {', '.join(material_data.get('tags', []))}
 Sentiment: {material_data.get('sentiment')}
 Relevance (General): {material_data.get('relevance_score')}
 """
+
+
+async def _evaluate_via_gemini(user_message: str) -> dict[str, Any] | None:
+    """Evaluate using Gemini 3.1 Pro via KIE (OpenAI-compatible format).
+
+    Returns evaluation dict, None on parse failure.
+    Raises AIServiceTemporarilyUnavailable if API is down.
+    """
+    import random
+    import asyncio
 
     payload = {
         "model": "gemini-3.1-pro",
@@ -110,41 +126,163 @@ Relevance (General): {material_data.get('relevance_score')}
         "Authorization": f"Bearer {KIE_API_KEY}",
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(KIE_API_URL, headers=headers, json=payload)
-    except httpx.RequestError as e:
-        logger.error("ai.evaluate.request_error", error=str(e))
-        return None
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(GEMINI_URL, json=payload, headers=headers)
+                data = resp.json()
 
-    if resp.status_code in [429, 500, 503, 504]:
-        logger.warning("ai.evaluate.temporarily_unavailable", status=resp.status_code)
-        raise AIServiceTemporarilyUnavailable(f"Status {resp.status_code}")
+                if isinstance(data, dict):
+                    if data.get("code") in (500, 503, 429, 455):
+                        msg = data.get("msg", "API error")
+                        if "frequency is too high" in msg and attempt < max_retries - 1:
+                            await asyncio.sleep(random.uniform(2, 6))
+                            continue
+                        raise AIServiceTemporarilyUnavailable(msg)
 
-    if resp.status_code != 200:
-        logger.error("ai.evaluate.http_error", status=resp.status_code, text=resp.text)
-        return None
-
-    try:
-        data = resp.json()
-
-        # Parse OpenAI-format tool call
-        message = data.get("choices", [])[0].get("message", {})
-        tool_calls = message.get("tool_calls", [])
-
-        if not tool_calls:
-            logger.error("ai.evaluate.no_tool_calls", message=message)
+                resp.raise_for_status()
+                break
+        except AIServiceTemporarilyUnavailable:
+            raise
+        except Exception as e:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(random.uniform(2, 6))
+                continue
+            logger.error("ai.evaluate.gemini_failed", error=str(e))
             return None
 
-        function_call = tool_calls[0].get("function", {})
-        if function_call.get("name") != "evaluate_material":
-            logger.error("ai.evaluate.wrong_tool", tool_name=function_call.get("name"))
+    # Parse OpenAI-format tool call
+    choices = data.get("choices", [])
+    if not choices:
+        logger.warning("ai.evaluate.gemini_no_choices")
+        return None
+
+    message = choices[0].get("message", {})
+    tool_calls = message.get("tool_calls", [])
+
+    if not tool_calls:
+        logger.error("ai.evaluate.no_tool_calls", message=message)
+        return None
+
+    function_call = tool_calls[0].get("function", {})
+    if function_call.get("name") != "evaluate_material":
+        logger.error("ai.evaluate.wrong_tool", tool_name=function_call.get("name"))
+        return None
+
+    args_raw = function_call.get("arguments", "{}")
+    if isinstance(args_raw, str):
+        return json.loads(args_raw)
+    return args_raw
+
+
+async def _evaluate_via_claude(user_message: str) -> dict[str, Any] | None:
+    """Evaluate using Claude Haiku 4.5 via KIE (Anthropic Messages format).
+
+    Returns evaluation dict, None on parse failure.
+    Raises AIServiceTemporarilyUnavailable if API is down.
+    """
+    import random
+    import asyncio
+
+    payload = {
+        "model": "claude-haiku-4-5",
+        "max_tokens": 2048,
+        "stream": False,
+        "messages": [
+            {"role": "user", "content": f"{SYSTEM_PROMPT}\n\n{user_message}"},
+        ],
+        "tools": [EVALUATE_TOOL_CLAUDE],
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {KIE_API_KEY}",
+    }
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(CLAUDE_URL, json=payload, headers=headers)
+                data = resp.json()
+
+                if isinstance(data, dict):
+                    if data.get("code") in (500, 503, 429, 455):
+                        msg = data.get("msg", "API error")
+                        if "frequency is too high" in msg and attempt < max_retries - 1:
+                            await asyncio.sleep(random.uniform(2, 6))
+                            continue
+                        raise AIServiceTemporarilyUnavailable(msg)
+                    if "error" in data:
+                        err = data["error"]
+                        msg = err.get("message", str(err))
+                        raise AIServiceTemporarilyUnavailable(msg)
+
+                resp.raise_for_status()
+                break
+        except AIServiceTemporarilyUnavailable:
+            raise
+        except Exception as e:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(random.uniform(2, 6))
+                continue
+            logger.error("ai.evaluate.claude_failed", error=str(e))
             return None
 
-        args_str = function_call.get("arguments", "{}")
-        args = json.loads(args_str)
+    # Parse Anthropic tool_use response
+    content_blocks = data.get("content", [])
 
-        return args
-    except Exception as e:
-        logger.error("ai.evaluate.parse_error", error=str(e), text=resp.text)
+    for block in content_blocks:
+        if block.get("type") == "tool_use" and block.get("name") == "evaluate_material":
+            result = block.get("input", {})
+            if result:
+                return result
+
+    # Fallback: try text blocks as JSON
+    for block in content_blocks:
+        if block.get("type") == "text":
+            try:
+                return json.loads(block["text"])
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+    logger.warning("ai.evaluate.claude_no_tool_result")
+    return None
+
+
+async def evaluate_material_for_project(
+    material_data: dict[str, Any], topic_guidelines: str, target_audience: str
+) -> dict[str, Any] | None:
+    """Evaluate a material against project guidelines — Gemini first, Claude fallback.
+
+    Returns evaluation dict with relevance_score, hype_score, is_recommended, explanation.
+    Raises AIServiceTemporarilyUnavailable only if ALL providers are down.
+    """
+    if not KIE_API_KEY:
+        logger.error("ai.evaluate.no_api_key")
         return None
+
+    user_message = _build_user_message(material_data, topic_guidelines, target_audience)
+
+    # Try Gemini first
+    try:
+        result = await _evaluate_via_gemini(user_message)
+        if result:
+            logger.info("ai.evaluate.success", provider="gemini")
+            return result
+    except AIServiceTemporarilyUnavailable as e:
+        logger.warning("ai.evaluate.gemini_down_trying_claude", error=str(e)[:100])
+
+    # Fallback to Claude Haiku 4.5
+    try:
+        result = await _evaluate_via_claude(user_message)
+        if result:
+            logger.info("ai.evaluate.success", provider="claude")
+            return result
+    except AIServiceTemporarilyUnavailable:
+        raise  # Both down — propagate for Celery retry
+
+    logger.error("ai.evaluate.all_providers_failed")
+    return None
+
