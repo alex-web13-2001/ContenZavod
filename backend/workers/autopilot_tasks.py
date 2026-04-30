@@ -198,6 +198,27 @@ def autopilot_rank_and_queue(self):
             shadow = config.get("shadow_mode", True)
             strategies = config.get("strategies", ["smart_queue"])
 
+            # Auto-promote shadow → queued when shadow_mode is disabled
+            if not shadow:
+                shadow_items = session.execute(
+                    select(AutopilotQueueItem).where(
+                        AutopilotQueueItem.channel_id == channel.id,
+                        AutopilotQueueItem.status == "shadow",
+                    )
+                ).scalars().all()
+
+                for si in shadow_items:
+                    si.status = "queued"
+                    si.updated_at = datetime.now(timezone.utc)
+                    log.info(
+                        "autopilot.shadow_promoted",
+                        adaptation_id=str(si.adaptation_id),
+                        channel=channel.name,
+                    )
+
+                if shadow_items:
+                    session.flush()
+
             # Count how many already queued/published today
             today_start = datetime.now(timezone.utc).replace(
                 hour=0, minute=0, second=0, microsecond=0
