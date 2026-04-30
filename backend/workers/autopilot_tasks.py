@@ -59,9 +59,44 @@ def _get_autopilot_config(channel) -> dict:
         "category_limits": {},
         "ttl_hours": {},
         "shadow_mode": True,
+        "language_settings": {},
     }
     cfg = channel.autopilot_config or {}
     return {**defaults, **cfg}
+
+
+def _get_language_config(config: dict, language: str) -> dict:
+    """Get per-language settings, falling back to channel-level defaults.
+
+    Supports per-language overrides for:
+    - max_posts_per_day
+    - min_interval_minutes
+    - min_score_threshold
+
+    Example config:
+        {
+            "max_posts_per_day": 10,           # channel default
+            "min_interval_minutes": 45,        # channel default
+            "language_settings": {
+                "ru": {"max_posts_per_day": 12, "min_interval_minutes": 30},
+                "en": {"max_posts_per_day": 8},
+                "el": {}                        # uses channel defaults
+            }
+        }
+    """
+    lang_overrides = config.get("language_settings", {}).get(language, {})
+    return {
+        "max_posts_per_day": lang_overrides.get(
+            "max_posts_per_day", config.get("max_posts_per_day", 10)
+        ),
+        "min_interval_minutes": lang_overrides.get(
+            "min_interval_minutes", config.get("min_interval_minutes", 45)
+        ),
+        "min_score_threshold": lang_overrides.get(
+            "min_score_threshold", config.get("min_score_threshold", 7.0)
+        ),
+    }
+
 
 
 def _compute_freshness(scraped_at: datetime, category: str, ttl_overrides: dict) -> float:
@@ -219,24 +254,57 @@ def autopilot_rank_and_queue(self):
                 if shadow_items:
                     session.flush()
 
-            # Count how many already queued/published today
+            # Count how many already queued/published today PER LANGUAGE
             today_start = datetime.now(timezone.utc).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
-            today_count = session.execute(
-                select(func.count(AutopilotQueueItem.id)).where(
+
+            # Get per-language counts for today
+            lang_counts_rows = session.execute(
+                select(
+                    ChannelAdaptation.language,
+                    func.count(AutopilotQueueItem.id),
+                )
+                .join(
+                    ChannelAdaptation,
+                    AutopilotQueueItem.adaptation_id == ChannelAdaptation.id,
+                )
+                .where(
                     AutopilotQueueItem.channel_id == channel.id,
                     AutopilotQueueItem.created_at >= today_start,
                     AutopilotQueueItem.status.in_(
                         ["queued", "shadow", "approved", "publishing", "published"]
                     ),
                 )
-            ).scalar() or 0
+                .group_by(ChannelAdaptation.language)
+            ).all()
+            today_counts_by_lang: dict[str, int] = {}
+            for lang, cnt in lang_counts_rows:
+                today_counts_by_lang[lang] = cnt
 
-            if today_count >= max_per_day:
+            # Compute remaining slots per language
+            remaining_by_lang: dict[str, int] = {}
+            all_full = True
+            for lang in (channel.languages or ["ru"]):
+                lang_cfg = _get_language_config(config, lang)
+                lang_max = lang_cfg["max_posts_per_day"]
+                lang_today = today_counts_by_lang.get(lang, 0)
+                rem = lang_max - lang_today
+                remaining_by_lang[lang] = max(0, rem)
+                if rem > 0:
+                    all_full = False
+
+            if all_full:
+                log.debug(
+                    "autopilot.all_languages_full",
+                    channel=channel.name,
+                    counts=today_counts_by_lang,
+                )
                 continue
 
-            remaining = max_per_day - today_count
+            # Track how many we queue per language in this cycle
+            queued_by_lang: dict[str, int] = {}
+
 
             # Find draft adaptations for this channel not yet in queue
             already_queued_ids = session.execute(
@@ -291,6 +359,13 @@ def autopilot_rank_and_queue(self):
                 if adapt.id in already_queued_set:
                     continue
 
+                # Per-language: skip if this language's slots are already full
+                adapt_lang = adapt.language or "ru"
+                lang_remaining = remaining_by_lang.get(adapt_lang, 0)
+                lang_already_queued = queued_by_lang.get(adapt_lang, 0)
+                if lang_remaining - lang_already_queued <= 0:
+                    continue
+
                 # Get project score for this material
                 score = session.execute(
                     select(MaterialProjectScore).where(
@@ -337,6 +412,10 @@ def autopilot_rank_and_queue(self):
                     )
                     continue
 
+                # Per-language threshold from language_settings
+                lang_cfg = _get_language_config(config, adapt_lang)
+                lang_threshold = lang_cfg.get("min_score_threshold", threshold)
+
                 final = _compute_final_score(
                     score.relevance_score, score.hype_score,
                     freshness, uniqueness,
@@ -353,7 +432,7 @@ def autopilot_rank_and_queue(self):
                     )
                 )
 
-                if not is_express and final < threshold:
+                if not is_express and final < lang_threshold:
                     continue
 
                 # Anti-spam: category balance check (pre-computed)
@@ -377,13 +456,19 @@ def autopilot_rank_and_queue(self):
                     "uniqueness": uniqueness,
                     "strategy": "express" if is_express else "smart_queue",
                     "category": category,
+                    "language": adapt_lang,
                 })
 
             # Sort by final score descending
             scored_items.sort(key=lambda x: x["final"], reverse=True)
 
-            # Take only remaining slots
-            for item in scored_items[:remaining]:
+            # Take items respecting per-language limits
+            for item in scored_items:
+                lang = item["language"]
+                lang_rem = remaining_by_lang.get(lang, 0)
+                lang_q = queued_by_lang.get(lang, 0)
+                if lang_q >= lang_rem:
+                    continue  # This language is full
                 adapt = item["adaptation"]
 
                 # Determine status based on shadow mode
@@ -414,6 +499,7 @@ def autopilot_rank_and_queue(self):
                 )
                 session.add(queue_item)
                 total_queued += 1
+                queued_by_lang[lang] = queued_by_lang.get(lang, 0) + 1
 
                 # Always dispatch cover generation for queued items
                 # cover_policy only controls whether PUBLISHING requires a cover
@@ -507,50 +593,67 @@ def autopilot_publish_next(self):
 
             config = _get_autopilot_config(channel)
 
-            # Anti-spam: check min interval
-            min_interval = config.get("min_interval_minutes", 45)
-            last_published = session.execute(
-                select(AutopilotQueueItem.published_at)
-                .where(
-                    AutopilotQueueItem.channel_id == channel.id,
-                    AutopilotQueueItem.status == "published",
-                )
-                .order_by(AutopilotQueueItem.published_at.desc())
-                .limit(1)
-            ).scalar()
-
-            if last_published and (now - last_published).total_seconds() < min_interval * 60:
-                # Too soon — reschedule
-                item.scheduled_at = last_published + timedelta(minutes=min_interval)
-                log.debug(
-                    "autopilot.rescheduled",
-                    adaptation_id=str(item.adaptation_id),
-                    next_at=item.scheduled_at.isoformat(),
-                )
-                continue
-
-            # Daily limit check
-            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            today_published = session.execute(
-                select(func.count(AutopilotQueueItem.id)).where(
-                    AutopilotQueueItem.channel_id == channel.id,
-                    AutopilotQueueItem.status == "published",
-                    AutopilotQueueItem.published_at >= today_start,
-                )
-            ).scalar() or 0
-
-            if today_published >= config.get("max_posts_per_day", 10):
-                item.status = "skipped"
-                item.skip_reason = f"daily_limit ({today_published}/{config['max_posts_per_day']})"
-                continue
-
-            # Cover readiness check
+            # Load the adaptation to get its language for per-language checks
             adaptation = session.get(ChannelAdaptation, item.adaptation_id)
             if not adaptation:
                 item.status = "skipped"
                 item.skip_reason = "adaptation_not_found"
                 continue
 
+            adapt_lang = adaptation.language or "ru"
+            lang_cfg = _get_language_config(config, adapt_lang)
+
+            # Anti-spam: check min interval PER LANGUAGE
+            min_interval = lang_cfg["min_interval_minutes"]
+            last_published = session.execute(
+                select(AutopilotQueueItem.published_at)
+                .join(
+                    ChannelAdaptation,
+                    AutopilotQueueItem.adaptation_id == ChannelAdaptation.id,
+                )
+                .where(
+                    AutopilotQueueItem.channel_id == channel.id,
+                    AutopilotQueueItem.status == "published",
+                    ChannelAdaptation.language == adapt_lang,
+                )
+                .order_by(AutopilotQueueItem.published_at.desc())
+                .limit(1)
+            ).scalar()
+
+            if last_published and (now - last_published).total_seconds() < min_interval * 60:
+                # Too soon for this language — reschedule
+                item.scheduled_at = last_published + timedelta(minutes=min_interval)
+                log.debug(
+                    "autopilot.rescheduled",
+                    adaptation_id=str(item.adaptation_id),
+                    language=adapt_lang,
+                    next_at=item.scheduled_at.isoformat(),
+                )
+                continue
+
+            # Daily limit check PER LANGUAGE
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            lang_max_per_day = lang_cfg["max_posts_per_day"]
+            today_published = session.execute(
+                select(func.count(AutopilotQueueItem.id))
+                .join(
+                    ChannelAdaptation,
+                    AutopilotQueueItem.adaptation_id == ChannelAdaptation.id,
+                )
+                .where(
+                    AutopilotQueueItem.channel_id == channel.id,
+                    AutopilotQueueItem.status == "published",
+                    AutopilotQueueItem.published_at >= today_start,
+                    ChannelAdaptation.language == adapt_lang,
+                )
+            ).scalar() or 0
+
+            if today_published >= lang_max_per_day:
+                item.status = "skipped"
+                item.skip_reason = f"daily_limit_{adapt_lang} ({today_published}/{lang_max_per_day})"
+                continue
+
+            # Cover readiness check (adaptation already loaded above)
             cover_policy = config.get("cover_policy", "short_post_optional")
             needs_cover = True
             if cover_policy == "short_post_optional" and adaptation.content_format == "short_post":

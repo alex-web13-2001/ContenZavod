@@ -41,6 +41,7 @@ class AutopilotConfigUpdate(BaseModel):
     strategies: list[str] | None = None
     category_limits: dict | None = None
     ttl_hours: dict | None = None
+    language_settings: dict | None = None  # Per-language overrides
 
 
 class QueueActionRequest(BaseModel):
@@ -84,6 +85,7 @@ async def get_autopilot_config(
                 "strategies": config.get("strategies", ["smart_queue", "express"]),
                 "category_limits": config.get("category_limits", {}),
                 "ttl_hours": config.get("ttl_hours", {}),
+                "language_settings": config.get("language_settings", {}),
             },
         })
 
