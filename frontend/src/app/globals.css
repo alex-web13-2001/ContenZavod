@@ -1400,6 +1400,80 @@ body {
   height: auto !important;
 }
 
+/* Per-language settings */
+.ap-lang-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.ap-lang-card {
+  background: hsl(var(--cz-bg-elevated) / 0.6);
+  border: 1px solid hsl(var(--cz-border-subtle));
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.ap-lang-card:hover {
+  border-color: hsl(var(--cz-border));
+  box-shadow: 0 0 0 1px hsl(var(--cz-primary) / 0.1);
+}
+
+.ap-lang-card__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid hsl(var(--cz-border-subtle) / 0.5);
+  background: hsl(var(--cz-bg-elevated) / 0.3);
+}
+
+.ap-lang-flag {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.ap-lang-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: hsl(var(--cz-text));
+  letter-spacing: 0.02em;
+}
+
+.ap-lang-card__body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 8px 10px 10px;
+}
+
+.ap-lang-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ap-lang-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: hsl(var(--cz-text-muted));
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ap-lang-input {
+  padding: 5px 8px !important;
+  font-size: 12px !important;
+  height: auto !important;
+  background: hsl(var(--cz-bg) / 0.5) !important;
+}
+
+@media (max-width: 640px) {
+  .ap-lang-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Score slider */
 .ap-score-input {
   display: flex;

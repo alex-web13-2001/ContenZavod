@@ -41,6 +41,11 @@ interface AutopilotChannelConfig {
     strategies: string[];
     category_limits: Record<string, number>;
     ttl_hours: Record<string, number>;
+    language_settings: Record<string, {
+      max_posts_per_day?: number;
+      min_interval_minutes?: number;
+      min_score_threshold?: number;
+    }>;
   };
 }
 
@@ -97,6 +102,15 @@ const COVER_LABELS: Record<string, string> = {
 const STRATEGY_LABELS: Record<string, { label: string; icon: React.ReactNode }> = {
   smart_queue: { label: "Smart Queue", icon: <BarChart3 size={12} /> },
   express: { label: "Express", icon: <Zap size={12} /> },
+};
+
+const LANG_LABELS: Record<string, { flag: string; name: string }> = {
+  ru: { flag: "🇷🇺", name: "Русский" },
+  en: { flag: "🇬🇧", name: "English" },
+  el: { flag: "🇬🇷", name: "Ελληνικά" },
+  tr: { flag: "🇹🇷", name: "Türkçe" },
+  de: { flag: "🇩🇪", name: "Deutsch" },
+  fr: { flag: "🇫🇷", name: "Français" },
 };
 
 /* ── Component ── */
@@ -470,6 +484,64 @@ function ChannelConfigCard({
               </div>
             </div>
           </div>
+
+          {/* Row 2.5: Per-language settings (only for multi-language channels) */}
+          {config.languages.length > 1 && (
+            <div className="ap-setting-section">
+              <label className="cz-form-label">Настройки по языкам</label>
+              <div className="ap-lang-grid">
+                {config.languages.map((lang) => {
+                  const langSettings = (localConfig.language_settings || {})[lang] || {};
+                  const langLabel = LANG_LABELS[lang] || { flag: "🌐", name: lang.toUpperCase() };
+                  const effectiveMax = langSettings.max_posts_per_day ?? localConfig.max_posts_per_day;
+                  const effectiveInterval = langSettings.min_interval_minutes ?? localConfig.min_interval_minutes;
+
+                  const updateLang = (field: string, value: number) => {
+                    const currentLangSettings = { ...(localConfig.language_settings || {}) };
+                    currentLangSettings[lang] = {
+                      ...(currentLangSettings[lang] || {}),
+                      [field]: value,
+                    };
+                    setLocalConfig({ ...localConfig, language_settings: currentLangSettings });
+                  };
+
+                  return (
+                    <div key={lang} className="ap-lang-card">
+                      <div className="ap-lang-card__header">
+                        <span className="ap-lang-flag">{langLabel.flag}</span>
+                        <span className="ap-lang-name">{langLabel.name}</span>
+                      </div>
+                      <div className="ap-lang-card__body">
+                        <div className="ap-lang-field">
+                          <label className="ap-lang-label">Постов/день</label>
+                          <input
+                            type="number"
+                            className="cz-input focus-ring ap-input--compact ap-lang-input"
+                            value={effectiveMax}
+                            min={1}
+                            max={30}
+                            onChange={(e) => updateLang("max_posts_per_day", Number(e.target.value))}
+                          />
+                        </div>
+                        <div className="ap-lang-field">
+                          <label className="ap-lang-label">Интервал (мин)</label>
+                          <input
+                            type="number"
+                            className="cz-input focus-ring ap-input--compact ap-lang-input"
+                            value={effectiveInterval}
+                            min={10}
+                            max={240}
+                            step={5}
+                            onChange={(e) => updateLang("min_interval_minutes", Number(e.target.value))}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Row 3: Time slots */}
           <div className="ap-setting-section">
