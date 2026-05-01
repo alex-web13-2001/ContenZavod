@@ -307,22 +307,39 @@ def autopilot_rank_and_queue(self):
             queued_by_lang: dict[str, int] = {}
 
 
-            # Find draft adaptations for this channel not yet in queue
-            already_queued_ids = session.execute(
-                select(AutopilotQueueItem.adaptation_id).where(
+
+            # Determine primary format for this channel type
+            _platform_primary = {
+                "telegram": "short_post",
+                "website": "longread",
+                "youtube": "video_script",
+            }
+            primary_format = _platform_primary.get(channel.channel_type, "short_post")
+
+            # Find materials already in queue or published for this channel
+            # This prevents the same article from being published twice
+            # (e.g. via short_post AND longread adaptations)
+            already_queued_material_ids = session.execute(
+                select(ChannelAdaptation.material_id).distinct()
+                .join(
+                    AutopilotQueueItem,
+                    AutopilotQueueItem.adaptation_id == ChannelAdaptation.id,
+                )
+                .where(
                     AutopilotQueueItem.channel_id == channel.id,
                     AutopilotQueueItem.status.in_(
-                        ["queued", "shadow", "approved", "publishing"]
+                        ["queued", "shadow", "approved", "publishing", "published"]
                     ),
                 )
             ).scalars().all()
-            already_queued_set = set(already_queued_ids)
+            already_published_materials = set(already_queued_material_ids)
 
-            # Get draft adaptations with their scores
+            # Get ONLY primary-format draft adaptations for this channel
             adaptations = session.execute(
                 select(ChannelAdaptation).where(
                     ChannelAdaptation.channel_id == channel.id,
                     ChannelAdaptation.status == "draft",
+                    ChannelAdaptation.content_format == primary_format,
                 )
             ).scalars().all()
 
@@ -357,7 +374,8 @@ def autopilot_rank_and_queue(self):
 
             scored_items = []
             for adapt in adaptations:
-                if adapt.id in already_queued_set:
+                # Skip if this material is already queued or published
+                if adapt.material_id in already_published_materials:
                     continue
 
                 # Per-language: skip if this language's slots are already full
@@ -686,6 +704,35 @@ def autopilot_publish_next(self):
                 item.status = "skipped"
                 item.skip_reason = "already_published"
                 item.publish_job_id = existing_job.id
+                continue
+
+            # Material-level dedup: skip if same material+language was
+            # already published or is being published for this channel
+            already_published_material = session.execute(
+                select(AutopilotQueueItem.id)
+                .join(
+                    ChannelAdaptation,
+                    AutopilotQueueItem.adaptation_id == ChannelAdaptation.id,
+                )
+                .where(
+                    AutopilotQueueItem.channel_id == channel.id,
+                    AutopilotQueueItem.id != item.id,
+                    AutopilotQueueItem.status.in_(["publishing", "published"]),
+                    ChannelAdaptation.material_id == adaptation.material_id,
+                    ChannelAdaptation.language == adapt_lang,
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+
+            if already_published_material:
+                item.status = "skipped"
+                item.skip_reason = f"material_already_published_{adapt_lang}"
+                log.info(
+                    "autopilot.skip_material_dup",
+                    adaptation_id=str(item.adaptation_id),
+                    language=adapt_lang,
+                    material_id=str(adaptation.material_id),
+                )
                 continue
 
             job = PublishJob(
