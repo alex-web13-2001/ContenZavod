@@ -272,6 +272,10 @@ def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
                 log.error("ai.evaluate_projects.eval_failed", project_id=str(project.id), error=str(e))
                 continue
 
+        # Update material status to 'evaluated' after scoring
+        material.status = "evaluated"
+        session.commit()
+
     log.info("ai.evaluate_projects.done", evaluated=evaluated)
     return {"status": "ok", "evaluated": evaluated}
 
@@ -402,6 +406,14 @@ def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_
 
     if adapted == 0:
         log.warning("ai.adapt_channels.all_failed", material_id=material_id)
+
+    # Update material status to 'adapted' if any adaptations were created
+    if adapted > 0:
+        with get_sync_session() as session:
+            material = session.get(RawMaterial, uuid.UUID(material_id))
+            if material:
+                material.status = "adapted"
+                session.commit()
 
     log.info("ai.adapt_channels.done", adapted=adapted)
     return {"status": "ok", "adapted": adapted}
