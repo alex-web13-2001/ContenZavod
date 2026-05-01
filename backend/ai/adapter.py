@@ -21,8 +21,8 @@ GEMINI_URL = "https://api.kie.ai/gemini-3.1-pro/v1/chat/completions"
 CLAUDE_URL = "https://api.kie.ai/claude/v1/messages"
 
 FORMAT_INSTRUCTIONS = {
-    "short_post": "Формат: Короткий пост (300–600 символов). Один ключевой факт, без воды. Можно эмодзи для акцентов. Один абзац.",
-    "longread": "Формат: Лонгрид (1000–3000 символов). Развёрнутая статья с вводкой, основной частью и выводом. 3-5 абзацев.",
+    "short_post": "Формат: Короткий пост для Telegram (300–700 символов). Один ключевой факт, без воды. Разбивай текст на абзацы по 2-3 предложения. Между абзацами ОБЯЗАТЕЛЬНО пустая строка (\\n\\n). Заключительный вопрос/вывод выделяется жирным и отделяется пустой строкой.",
+    "longread": "Формат: Лонгрид (1000–3000 символов). Развёрнутая статья с вводкой, основной частью и выводом. 3-5 абзацев, между абзацами пустая строка.",
     "video_script": "Формат: Видеоскрипт (500–1500 символов). Сценарий для озвучки: хук в первые 5 секунд, основная часть, call-to-action.",
     "digest": "Формат: Дайджест-пункт (100–250 символов). Ультра-краткий саммари новости в одну фразу для новостного дайджеста.",
 }
@@ -39,8 +39,9 @@ Rules:
    - DO NOT use markdown links like [text](url) — never embed URLs in the body text
    - DO NOT use bold **markers** inside sentences for emphasis on numbers or words
    - Bold **text** is ONLY allowed for the final concluding question or thought (and only if formatting rules require it)
-   - Use emoji sparingly for paragraph accents only
-   - Paragraphs separated by blank lines
+   - Use emoji sparingly — only at the start of the first paragraph for accent
+   - CRITICAL: Break text into paragraphs of 2-3 sentences each, separated by BLANK LINES (\\n\\n)
+   - NEVER write the entire post as one continuous block of text
 6. DO NOT invent facts — use only information from the source material
 7. DO NOT include meta-text like "Вот пост:", "Заголовок:", structural markers like "(Хук)", "(Основная часть)" etc.
 8. FORMATTING RULES ARE MANDATORY — if formatting rules are provided, you MUST follow them exactly.
