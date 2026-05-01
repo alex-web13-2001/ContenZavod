@@ -34,13 +34,19 @@ Rules:
 1. ALWAYS write in the specified language
 2. Follow the tone of voice instructions precisely
 3. Follow the content format instructions precisely
-4. The headline should be catchy and attention-grabbing
-5. Use Telegram-compatible markdown (bold **text**, italic _text_, [links](url))
+4. The headline should be catchy and attention-grabbing, with an emoji at the start
+5. Write the body as CLEAN PLAIN TEXT:
+   - DO NOT use markdown links like [text](url) — never embed URLs in the body text
+   - DO NOT use bold **markers** inside sentences for emphasis on numbers or words
+   - Bold **text** is ONLY allowed for the final concluding question or thought (and only if formatting rules require it)
+   - Use emoji sparingly for paragraph accents only
+   - Paragraphs separated by blank lines
 6. DO NOT invent facts — use only information from the source material
-7. DO NOT include meta-text like "Вот пост:" or "Заголовок:", just output the content directly
+7. DO NOT include meta-text like "Вот пост:", "Заголовок:", structural markers like "(Хук)", "(Основная часть)" etc.
 8. FORMATTING RULES ARE MANDATORY — if formatting rules are provided, you MUST follow them exactly.
-   This includes paragraph structure, line breaks between paragraphs, bold/emoji usage, and any other formatting directives.
+   This includes paragraph structure, line breaks between paragraphs, and any other formatting directives.
    Violations of formatting rules are NOT acceptable.
+9. The source URL will be attached automatically — DO NOT include it in the body text.
 
 Always call the adapt_content tool with your result.
 """
@@ -60,7 +66,7 @@ ADAPT_TOOL = {
                 },
                 "body": {
                     "type": "string",
-                    "description": "Full body text ready for publishing, in markdown",
+                    "description": "Full body text ready for publishing, clean plain text without markdown links or excessive formatting",
                 },
                 "priority": {
                     "type": "string",
