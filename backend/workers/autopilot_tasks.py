@@ -29,20 +29,21 @@ SCHEDULE_SLOTS = {
 }
 
 # Category freshness TTL (hours) — after this, material is too stale
+# These are generous defaults; override per-channel via autopilot_config.ttl_hours
 DEFAULT_TTL = {
-    "politics": 12,
-    "economy": 24,
-    "society": 18,
-    "sport": 8,
-    "culture": 36,
-    "tech": 48,
-    "lifestyle": 48,
-    "crime": 12,
-    "health": 24,
-    "environment": 36,
-    "world": 18,
-    "opinion": 48,
-    "default": 24,
+    "politics": 48,
+    "economy": 72,
+    "society": 72,
+    "sport": 24,
+    "culture": 168,
+    "tech": 168,
+    "lifestyle": 168,
+    "crime": 48,
+    "health": 72,
+    "environment": 168,
+    "world": 48,
+    "opinion": 168,
+    "default": 72,
 }
 
 
@@ -392,9 +393,12 @@ def autopilot_rank_and_queue(self):
                     ttl_overrides,
                 )
 
-                # Skip expired materials
+                # Soft freshness floor — expired materials get minimum score
+                # instead of being dropped entirely. This prevents empty queues
+                # when no fresh content is available. The ranking system will
+                # naturally prioritize newer materials over stale ones.
                 if freshness <= 0:
-                    continue
+                    freshness = 1.0  # floor — heavily penalized but not excluded
 
                 # Phase 2: Compute real uniqueness score via semantic fingerprint
                 fingerprint = (material.metadata_ or {}).get("semantic_fingerprint", [])
