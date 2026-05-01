@@ -34,7 +34,7 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
-@shared_task(bind=True, name="workers.ai_tasks.classify_material", max_retries=2)
+@shared_task(bind=True, name="workers.ai_tasks.classify_material", max_retries=5)
 def classify_material(self, material_id: str, tenant_id: str):
     """Classify a single material using Claude Haiku 4.5."""
     log = logger.bind(material_id=material_id, tenant_id=tenant_id)
@@ -78,7 +78,11 @@ def classify_material(self, material_id: str, tenant_id: str):
         if not result:
             log.warning("ai.classify.empty_result")
             material.status = "new"  # Reset for retry
-            return {"status": "error", "reason": "empty_result"}
+            session.commit()
+            raise self.retry(
+                exc=Exception("Empty classification result"),
+                countdown=60 * (self.request.retries + 1),
+            )
 
         # Update material with classification data
         meta = {**material.metadata_}
@@ -167,7 +171,7 @@ def evaluate_classified_materials(tenant_id: str | None = None):
     return {"queued": queued}
 
 
-@shared_task(bind=True, name="workers.ai_tasks.evaluate_material_for_projects", max_retries=3)
+@shared_task(bind=True, name="workers.ai_tasks.evaluate_material_for_projects", max_retries=5)
 def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
     """Evaluate a classified material against all active projects for a tenant.
 
@@ -280,7 +284,7 @@ def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
     return {"status": "ok", "evaluated": evaluated}
 
 
-@shared_task(bind=True, name="workers.ai_tasks.adapt_material_for_channels", max_retries=3)
+@shared_task(bind=True, name="workers.ai_tasks.adapt_material_for_channels", max_retries=5)
 def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_id: str):
     """Generate adapted content for the PRIMARY format of each channel.
 

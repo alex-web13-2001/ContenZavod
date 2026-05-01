@@ -284,5 +284,5 @@ async def evaluate_material_for_project(
         raise  # Both down — propagate for Celery retry
 
     logger.error("ai.evaluate.all_providers_failed")
-    return None
+    raise AIServiceTemporarilyUnavailable("All AI providers failed for evaluation")
 

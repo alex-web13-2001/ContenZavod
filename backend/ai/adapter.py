@@ -332,5 +332,5 @@ async def adapt_material_for_channel(
         raise  # Both down — propagate for Celery retry
 
     logger.error("ai.adapt.all_providers_failed")
-    return None
+    raise AIServiceTemporarilyUnavailable("All AI providers failed for adaptation")
 

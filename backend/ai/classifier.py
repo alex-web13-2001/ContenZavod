@@ -349,7 +349,7 @@ Content: {truncated}"""
         raise  # Both are down — propagate up for Celery retry
 
     logger.error("ai.classify.all_providers_failed", title=title[:60])
-    return None
+    raise AIServiceTemporarilyUnavailable("All AI providers failed for classification")
 
 
 async def classify_batch(
