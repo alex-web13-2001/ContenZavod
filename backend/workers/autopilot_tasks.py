@@ -747,14 +747,28 @@ def autopilot_publish_next(self):
 
             # Cover readiness check (adaptation already loaded above)
             cover_policy = config.get("cover_policy", "short_post_optional")
+
+            # Always wait for a cover that's still being generated —
+            # "optional" means we can skip if cover is absent or permanently
+            # failed, NOT that we should publish while it's still creating.
+            if adaptation.cover_status == "generating":
+                log.debug(
+                    "autopilot.waiting_cover_generating",
+                    adaptation_id=str(adaptation.id),
+                )
+                continue
+
+            # For formats/strategies where cover IS required, also wait
+            # for error/retry states (they might still resolve)
             needs_cover = True
             if cover_policy == "short_post_optional" and adaptation.content_format == "short_post":
+                needs_cover = False
+            if cover_policy == "never":
                 needs_cover = False
             if item.strategy == "express":
                 needs_cover = False
 
             if needs_cover and adaptation.cover_status != "ready":
-                # Cover not ready — keep in queue, don't skip
                 log.debug(
                     "autopilot.waiting_cover",
                     adaptation_id=str(adaptation.id),
