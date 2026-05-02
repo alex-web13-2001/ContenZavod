@@ -77,7 +77,7 @@ services:
     command: >
       celery -A workers.celery_app worker
       --loglevel=info
-      --concurrency=4
+      --concurrency=8
       -Q scrape_queue,ai_queue,publish_queue,media_queue,analytics_queue
       -n worker@%h
 
