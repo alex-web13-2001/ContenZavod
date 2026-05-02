@@ -343,6 +343,45 @@ def autopilot_rank_and_queue(self):
                 )
             ).scalars().all()
 
+            # --- Lazy adapt: trigger adaptation for top scored materials ---
+            # Only adapt materials that will actually be needed (remaining slots + buffer)
+            total_remaining = sum(remaining_by_lang.values())
+            adapt_budget = total_remaining + 5  # small buffer for filtering
+
+            # Materials that already have adaptations for this channel
+            adapted_material_ids = set(a.material_id for a in adaptations)
+            adapted_material_ids.update(already_published_materials)
+
+            # Find top-scored recommended materials WITHOUT adaptations
+            from app.models.project_score import MaterialProjectScore as MPS_lazy
+
+            unadapted = session.execute(
+                select(MPS_lazy.material_id, MPS_lazy.project_id, RawMaterial.tenant_id)
+                .join(RawMaterial, MPS_lazy.material_id == RawMaterial.id)
+                .where(
+                    MPS_lazy.project_id == channel.project_id,
+                    MPS_lazy.is_recommended == True,
+                    ~MPS_lazy.material_id.in_(adapted_material_ids) if adapted_material_ids else True,
+                )
+                .order_by(
+                    (MPS_lazy.relevance_score + MPS_lazy.hype_score).desc()
+                )
+                .limit(adapt_budget)
+            ).all()
+
+            if unadapted:
+                from workers.ai_tasks import adapt_material_for_channels
+                for mat_id, proj_id, t_id in unadapted:
+                    adapt_material_for_channels.delay(
+                        str(mat_id), str(proj_id), str(t_id)
+                    )
+                log.info(
+                    "autopilot.lazy_adapt_triggered",
+                    channel=channel.name,
+                    count=len(unadapted),
+                    budget=adapt_budget,
+                )
+
             # Pre-compute category counts for today (anti-spam) — one query
             cat_limits = config.get("category_limits", DEFAULT_CATEGORY_LIMITS)
             category_counts_today: dict[str, int] = {}

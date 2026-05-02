@@ -167,39 +167,8 @@ def evaluate_classified_materials(tenant_id: str | None = None):
         evaluate_material_for_projects.delay(str(mat_id), str(t_id))
         queued += 1
 
-    # Also find classified materials that HAVE scores + recommended
-    # but are MISSING draft adaptations (e.g. after cleanup).
-    # For these, skip evaluation and go directly to adapt.
-    from app.models.channel_adaptation import ChannelAdaptation
-    from app.models.project import Project
-
-    with get_sync_session() as session:
-        from app.models.project_score import MaterialProjectScore as MPS2
-        needs_readapt = session.execute(
-            select(
-                RawMaterial.id,
-                RawMaterial.tenant_id,
-                MPS2.project_id,
-            ).join(
-                MPS2, MPS2.material_id == RawMaterial.id,
-            ).where(
-                RawMaterial.status == "classified",
-                MPS2.is_recommended == True,
-                ~RawMaterial.id.in_(
-                    select(ChannelAdaptation.material_id)
-                    .where(ChannelAdaptation.status == "draft")
-                    .distinct()
-                ),
-            ).limit(50)
-        ).all()
-
-    readapt_count = 0
-    for mat_id, t_id, proj_id in needs_readapt:
-        adapt_material_for_channels.delay(str(mat_id), str(proj_id), str(t_id))
-        readapt_count += 1
-
-    log.info("ai.evaluate_batch.done", queued=queued, readapt=readapt_count)
-    return {"queued": queued, "readapt": readapt_count}
+    log.info("ai.evaluate_batch.done", queued=queued)
+    return {"queued": queued}
 
 
 @shared_task(bind=True, name="workers.ai_tasks.evaluate_material_for_projects", max_retries=5)
@@ -261,24 +230,6 @@ def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
             ).scalar_one_or_none()
 
             if existing:
-                # Score already exists — but check if adaptation is missing
-                # (e.g. after cleanup). If recommended but no draft → re-adapt.
-                if existing.is_recommended:
-                    from app.models.channel_adaptation import ChannelAdaptation
-                    has_draft = session.execute(
-                        select(ChannelAdaptation.id).where(
-                            ChannelAdaptation.material_id == material.id,
-                            ChannelAdaptation.status == "draft",
-                        ).limit(1)
-                    ).scalar_one_or_none()
-                    if not has_draft:
-                        log.info(
-                            "ai.evaluate_projects.re_adapt_missing",
-                            project_id=str(project.id),
-                        )
-                        adapt_material_for_channels.delay(
-                            material_id, str(project.id), tenant_id
-                        )
                 continue
 
             try:
@@ -310,11 +261,8 @@ def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
                         recommended=result.get("is_recommended"),
                     )
 
-                    # If recommended → auto-adapt for all channels in this project
-                    if result.get("is_recommended"):
-                        adapt_material_for_channels.delay(
-                            material_id, str(project.id), tenant_id
-                        )
+                    # Adaptation is triggered lazily by autopilot_rank_and_queue
+                    # for only the top candidates. No eager adapt here.
 
             except AIServiceTemporarilyUnavailable as e:
                 log.warning("ai.evaluate_projects.api_unavailable", error=str(e))
