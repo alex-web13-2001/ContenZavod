@@ -324,9 +324,20 @@ class PublishService:
 
         adaptation.status = "published"
 
-        # Note: editorial_status is now set explicitly by the
-        # batch-publish endpoint. We do NOT change it here to avoid
-        # race conditions with the batch flow.
+        # Update editorial pipeline status so published posts
+        # appear in the "Published" tab for ALL publish paths
+        # (manual batch-publish AND autopilot)
+        from sqlalchemy import select, update as sa_update
+        from app.models.project_score import MaterialProjectScore
+
+        self.session.execute(
+            sa_update(MaterialProjectScore)
+            .where(
+                MaterialProjectScore.material_id == adaptation.material_id,
+                MaterialProjectScore.editorial_status != "published",
+            )
+            .values(editorial_status="published")
+        )
 
         self.session.commit()
 
