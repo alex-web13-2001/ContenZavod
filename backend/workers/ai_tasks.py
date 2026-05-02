@@ -444,11 +444,6 @@ def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_
                             priority=result.get("priority"),
                         )
 
-                        # Trigger cover generation for the new adaptation
-                        generate_adaptation_cover.delay(
-                            str(adaptation.id), tenant_id
-                        )
-
                 except AIServiceTemporarilyUnavailable as e:
                     log.warning("ai.adapt_channels.api_unavailable", error=str(e))
                     session.commit()
