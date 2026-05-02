@@ -4,14 +4,22 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8010/api/v1
 function emitAuthFailure() {
   if (typeof window !== "undefined") {
     localStorage.removeItem("cz_token");
+    localStorage.removeItem("cz_refresh_token");
     window.dispatchEvent(new CustomEvent("cz:auth-failure"));
   }
 }
 
 class ApiClient {
+  private refreshPromise: Promise<boolean> | null = null;
+
   private getToken(): string | null {
     if (typeof window === "undefined") return null;
     return localStorage.getItem("cz_token");
+  }
+
+  private getRefreshToken(): string | null {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("cz_refresh_token");
   }
 
   private headers(): Record<string, string> {
@@ -21,12 +29,57 @@ class ApiClient {
     return h;
   }
 
+  /** Try to get new tokens using the refresh token. Returns true on success. */
+  private async tryRefresh(): Promise<boolean> {
+    const refreshToken = this.getRefreshToken();
+    if (!refreshToken) return false;
+
+    try {
+      const res = await fetch(`${API_URL}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (!res.ok) return false;
+
+      const tokens = await res.json();
+      localStorage.setItem("cz_token", tokens.access_token);
+      localStorage.setItem("cz_refresh_token", tokens.refresh_token);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Deduplicated refresh — only one refresh request at a time. */
+  private async refresh(): Promise<boolean> {
+    if (!this.refreshPromise) {
+      this.refreshPromise = this.tryRefresh().finally(() => {
+        this.refreshPromise = null;
+      });
+    }
+    return this.refreshPromise;
+  }
+
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(`${API_URL}${path}`, {
+    let res = await fetch(`${API_URL}${path}`, {
       method,
       headers: this.headers(),
       body: body ? JSON.stringify(body) : undefined,
     });
+
+    // On 401 — try to refresh the token and retry once
+    if (res.status === 401 && this.getRefreshToken()) {
+      const refreshed = await this.refresh();
+      if (refreshed) {
+        res = await fetch(`${API_URL}${path}`, {
+          method,
+          headers: this.headers(),
+          body: body ? JSON.stringify(body) : undefined,
+        });
+      }
+    }
 
     if (res.status === 401) {
       emitAuthFailure();
