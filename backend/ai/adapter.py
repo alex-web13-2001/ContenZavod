@@ -98,6 +98,49 @@ LANGUAGE_NAMES = {
     "es": "Español", "fr": "Français", "zh": "中文", "el": "Ελληνικά",
 }
 
+# Scripts expected for each language (used for post-generation validation)
+# Maps language code → set of Unicode script names that are acceptable
+_CYRILLIC_LANGS = {"ru", "uk"}
+_LATIN_LANGS = {"en", "de", "es", "fr"}
+_GREEK_LANGS = {"el"}
+
+
+def _validate_language(result: dict[str, Any], expected_lang: str) -> bool:
+    """Validate that generated content is actually in the expected language.
+
+    Uses a simple heuristic: count Cyrillic vs Latin vs Greek characters
+    in headline+body and check if the dominant script matches expectations.
+    Returns True if content language looks correct, False otherwise.
+    """
+    text = (result.get("headline", "") + " " + result.get("body", "")).strip()
+    if not text:
+        return True  # Empty — nothing to validate
+
+    # Count characters by script
+    cyrillic = sum(1 for c in text if '\u0400' <= c <= '\u04FF')
+    latin = sum(1 for c in text if ('A' <= c <= 'Z') or ('a' <= c <= 'z'))
+    greek = sum(1 for c in text if '\u0370' <= c <= '\u03FF')
+    total_alpha = cyrillic + latin + greek
+
+    if total_alpha < 20:
+        return True  # Too few chars to judge
+
+    cyrillic_ratio = cyrillic / total_alpha
+    latin_ratio = latin / total_alpha
+    greek_ratio = greek / total_alpha
+
+    if expected_lang in _CYRILLIC_LANGS:
+        # Expect mostly Cyrillic
+        return cyrillic_ratio > 0.5
+    elif expected_lang in _LATIN_LANGS:
+        # Expect mostly Latin — reject if heavy Cyrillic
+        return latin_ratio > 0.4 and cyrillic_ratio < 0.2
+    elif expected_lang in _GREEK_LANGS:
+        # Expect Greek or Latin (Greek posts often have Latin proper nouns)
+        return greek_ratio > 0.3 and cyrillic_ratio < 0.2
+
+    return True  # Unknown language — pass through
+
 
 def _build_adapt_message(
     material_data: dict[str, Any],
@@ -324,8 +367,17 @@ async def adapt_material_for_channel(
     try:
         result = await _adapt_via_gemini(user_message)
         if result:
-            logger.info("ai.adapt.success", provider="gemini")
-            return result
+            if _validate_language(result, language):
+                logger.info("ai.adapt.success", provider="gemini")
+                return result
+            else:
+                logger.warning(
+                    "ai.adapt.wrong_language",
+                    provider="gemini",
+                    expected=language,
+                    headline=result.get("headline", "")[:60],
+                )
+                # Fall through to Claude — maybe it will respect language
     except AIServiceTemporarilyUnavailable as e:
         logger.warning("ai.adapt.gemini_down_trying_claude", error=str(e)[:100])
 
@@ -333,8 +385,16 @@ async def adapt_material_for_channel(
     try:
         result = await _adapt_via_claude(user_message)
         if result:
-            logger.info("ai.adapt.success", provider="claude")
-            return result
+            if _validate_language(result, language):
+                logger.info("ai.adapt.success", provider="claude")
+                return result
+            else:
+                logger.error(
+                    "ai.adapt.wrong_language_all_providers",
+                    expected=language,
+                    headline=result.get("headline", "")[:60],
+                )
+                return None  # Both providers generated wrong language
     except AIServiceTemporarilyUnavailable:
         raise  # Both down — propagate for Celery retry
 
