@@ -481,12 +481,14 @@ def autopilot_rank_and_queue(self):
                     ttl_overrides,
                 )
 
-                # Soft freshness floor — expired materials get minimum score
+                # Soft freshness floor — expired materials get moderate score
                 # instead of being dropped entirely. This prevents empty queues
                 # when no fresh content is available. The ranking system will
                 # naturally prioritize newer materials over stale ones.
+                # Floor of 5.0 ensures top-scoring materials (rel≥8, hype≥7)
+                # can still pass the threshold (7.0) even when expired.
                 if freshness <= 0:
-                    freshness = 1.0  # floor — heavily penalized but not excluded
+                    freshness = 5.0  # moderate penalty — won't starve the queue
 
                 # Phase 2: Compute real uniqueness score via semantic fingerprint
                 fingerprint = (material.metadata_ or {}).get("semantic_fingerprint", [])
