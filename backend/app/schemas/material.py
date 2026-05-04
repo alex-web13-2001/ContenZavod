@@ -56,10 +56,23 @@ class MaterialListResponse(BaseModel):
     @classmethod
     def extract_ai_fields(cls, data: Any) -> Any:
         """Pull AI classification from metadata JSONB into flat fields."""
+        import json as _json
+
         if hasattr(data, "__dict__"):
             # SQLAlchemy model → dict
             meta = getattr(data, "metadata_", None) or {}
             ai = meta.get("ai_classification", {}) if isinstance(meta, dict) else {}
+
+            # Safely parse tags — AI sometimes returns them as a JSON string
+            raw_tags = ai.get("tags", [])
+            if isinstance(raw_tags, str):
+                try:
+                    raw_tags = _json.loads(raw_tags)
+                except (ValueError, _json.JSONDecodeError):
+                    raw_tags = []
+            if not isinstance(raw_tags, list):
+                raw_tags = []
+
             d = {
                 "id": data.id,
                 "source_id": data.source_id,
@@ -70,7 +83,7 @@ class MaterialListResponse(BaseModel):
                 "scraped_at": data.scraped_at,
                 "created_at": data.created_at,
                 "category": ai.get("category"),
-                "tags": ai.get("tags", []),
+                "tags": raw_tags,
                 "summary_ru": ai.get("summary_ru"),
                 "relevance_score": ai.get("relevance_score"),
                 "sentiment": ai.get("sentiment"),
