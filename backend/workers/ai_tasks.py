@@ -86,6 +86,17 @@ def classify_material(self, material_id: str, tenant_id: str):
 
         # Update material with classification data
         meta = {**material.metadata_}
+
+        # Normalize tags — AI sometimes returns them as a JSON string
+        if isinstance(result.get("tags"), str):
+            import json as _json
+            try:
+                result["tags"] = _json.loads(result["tags"])
+            except (ValueError, _json.JSONDecodeError):
+                result["tags"] = []
+        if not isinstance(result.get("tags"), list):
+            result["tags"] = []
+
         meta["ai_classification"] = result
         meta["classified_at"] = datetime.now(timezone.utc).isoformat()
         meta["classified_by"] = "gemini-3-pro"
