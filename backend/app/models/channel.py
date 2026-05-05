@@ -75,5 +75,22 @@ class Channel(Base, TenantMixin, TimestampMixin):
 
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
 
+    # Autopilot configuration (per-channel)
+    # Structure: {
+    #   "enabled": false,
+    #   "strategies": ["smart_queue", "express"],
+    #   "max_posts_per_day": 10,
+    #   "min_interval_minutes": 45,
+    #   "min_score_threshold": 7.0,
+    #   "cover_policy": "short_post_optional",
+    #   "schedule_slots": ["morning", "lunch", "evening"],
+    #   "category_limits": {"politics": 3, "sport": 2},
+    #   "ttl_hours": {"default": 24, "breaking": 4, "sport": 8},
+    #   "shadow_mode": true
+    # }
+    autopilot_config: Mapped[dict] = mapped_column(
+        JSONB, server_default="{}", nullable=False
+    )
+
     # Relationships
     project = relationship("Project", back_populates="channels")

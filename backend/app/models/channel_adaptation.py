@@ -7,7 +7,7 @@ translated to the target language.
 
 import uuid
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint, text
+from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -68,7 +68,13 @@ class ChannelAdaptation(Base, TenantMixin, TimestampMixin):
     )  # MinIO path e.g. /api/v1/files/covers/uuid.png
     cover_status: Mapped[str | None] = mapped_column(
         String(20), nullable=True
-    )  # null | generating | ready | error
+    )  # null | generating | ready | error | permanently_failed
+
+    # Cover retry tracking (for autopilot)
+    cover_retry_count: Mapped[int] = mapped_column(
+        Integer, server_default="0", nullable=False
+    )
+    cover_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
     material = relationship("RawMaterial", backref="channel_adaptations")

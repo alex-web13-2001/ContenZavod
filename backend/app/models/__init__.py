@@ -20,6 +20,7 @@ from app.models.publish_job import PublishJob
 from app.models.publication_metric import PublicationMetric
 from app.models.prompt_config import PromptConfig
 from app.models.video_digest import VideoDigest
+from app.models.autopilot_queue import AutopilotQueueItem
 
 __all__ = [
     "Base",
@@ -41,4 +42,5 @@ __all__ = [
     "PublicationMetric",
     "PromptConfig",
     "VideoDigest",
+    "AutopilotQueueItem",
 ]

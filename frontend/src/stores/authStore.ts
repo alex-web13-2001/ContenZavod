@@ -37,19 +37,22 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user, initialized: true, loading: false });
     } catch {
       localStorage.removeItem("cz_token");
+      localStorage.removeItem("cz_refresh_token");
       set({ user: null, initialized: true, loading: false });
     }
   },
 
   login: async (email, password) => {
-    const tokens = await api.post<{ access_token: string }>("/auth/login", { email, password });
+    const tokens = await api.post<{ access_token: string; refresh_token: string }>("/auth/login", { email, password });
     localStorage.setItem("cz_token", tokens.access_token);
+    localStorage.setItem("cz_refresh_token", tokens.refresh_token);
     const user = await api.get<User>("/auth/me");
     set({ user, initialized: true });
   },
 
   logout: () => {
     localStorage.removeItem("cz_token");
+    localStorage.removeItem("cz_refresh_token");
     // Set user to null — layout will detect and router.push("/login")
     // No window.location.href = full page reload!
     set({ user: null });

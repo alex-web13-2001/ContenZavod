@@ -34,7 +34,7 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
-@shared_task(bind=True, name="workers.ai_tasks.classify_material", max_retries=2)
+@shared_task(bind=True, name="workers.ai_tasks.classify_material", max_retries=5)
 def classify_material(self, material_id: str, tenant_id: str):
     """Classify a single material using Claude Haiku 4.5."""
     log = logger.bind(material_id=material_id, tenant_id=tenant_id)
@@ -78,13 +78,33 @@ def classify_material(self, material_id: str, tenant_id: str):
         if not result:
             log.warning("ai.classify.empty_result")
             material.status = "new"  # Reset for retry
-            return {"status": "error", "reason": "empty_result"}
+            session.commit()
+            raise self.retry(
+                exc=Exception("Empty classification result"),
+                countdown=60 * (self.request.retries + 1),
+            )
 
         # Update material with classification data
         meta = {**material.metadata_}
+
+        # Normalize tags — AI sometimes returns them as a JSON string
+        if isinstance(result.get("tags"), str):
+            import json as _json
+            try:
+                result["tags"] = _json.loads(result["tags"])
+            except (ValueError, _json.JSONDecodeError):
+                result["tags"] = []
+        if not isinstance(result.get("tags"), list):
+            result["tags"] = []
+
         meta["ai_classification"] = result
         meta["classified_at"] = datetime.now(timezone.utc).isoformat()
         meta["classified_by"] = "gemini-3-pro"
+
+        # Save semantic fingerprint for deduplication (Phase 2)
+        key_entities = result.get("key_entities", [])
+        if key_entities:
+            meta["semantic_fingerprint"] = [e.lower().strip() for e in key_entities if e]
 
         material.metadata_ = meta
         material.status = "classified"
@@ -162,7 +182,7 @@ def evaluate_classified_materials(tenant_id: str | None = None):
     return {"queued": queued}
 
 
-@shared_task(bind=True, name="workers.ai_tasks.evaluate_material_for_projects", max_retries=3)
+@shared_task(bind=True, name="workers.ai_tasks.evaluate_material_for_projects", max_retries=5)
 def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
     """Evaluate a classified material against all active projects for a tenant.
 
@@ -221,7 +241,6 @@ def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
             ).scalar_one_or_none()
 
             if existing:
-                log.debug("ai.evaluate_projects.already_scored", project_id=str(project.id))
                 continue
 
             try:
@@ -253,11 +272,8 @@ def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
                         recommended=result.get("is_recommended"),
                     )
 
-                    # If recommended → auto-adapt for all channels in this project
-                    if result.get("is_recommended"):
-                        adapt_material_for_channels.delay(
-                            material_id, str(project.id), tenant_id
-                        )
+                    # Adaptation is triggered lazily by autopilot_rank_and_queue
+                    # for only the top candidates. No eager adapt here.
 
             except AIServiceTemporarilyUnavailable as e:
                 log.warning("ai.evaluate_projects.api_unavailable", error=str(e))
@@ -267,11 +283,15 @@ def evaluate_material_for_projects(self, material_id: str, tenant_id: str):
                 log.error("ai.evaluate_projects.eval_failed", project_id=str(project.id), error=str(e))
                 continue
 
+        # Update material status to 'evaluated' after scoring
+        material.status = "evaluated"
+        session.commit()
+
     log.info("ai.evaluate_projects.done", evaluated=evaluated)
     return {"status": "ok", "evaluated": evaluated}
 
 
-@shared_task(bind=True, name="workers.ai_tasks.adapt_material_for_channels", max_retries=3)
+@shared_task(bind=True, name="workers.ai_tasks.adapt_material_for_channels", max_retries=5)
 def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_id: str):
     """Generate adapted content for the PRIMARY format of each channel.
 
@@ -397,6 +417,14 @@ def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_
 
     if adapted == 0:
         log.warning("ai.adapt_channels.all_failed", material_id=material_id)
+
+    # Update material status to 'adapted' if any adaptations were created
+    if adapted > 0:
+        with get_sync_session() as session:
+            material = session.get(RawMaterial, uuid.UUID(material_id))
+            if material:
+                material.status = "adapted"
+                session.commit()
 
     log.info("ai.adapt_channels.done", adapted=adapted)
     return {"status": "ok", "adapted": adapted}
@@ -608,7 +636,7 @@ def generate_cover_image(self, material_id: str, tenant_id: str, language: str =
 @shared_task(
     bind=True,
     name="workers.ai_tasks.generate_adaptation_cover",
-    max_retries=2,
+    max_retries=5,
     queue="media_queue",
 )
 def generate_adaptation_cover(self, adaptation_id: str, tenant_id: str):
@@ -660,12 +688,14 @@ def generate_adaptation_cover(self, adaptation_id: str, tenant_id: str):
         except ImageGenerationError as e:
             log.error("image.adaptation.failed", error=str(e))
             adaptation.cover_status = "error"
+            adaptation.cover_last_error = str(e)
             session.commit()
-            raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+            raise self.retry(exc=e, countdown=180 * (self.request.retries + 1))
 
         if not result or not result.get("image_url"):
             log.error("image.adaptation.no_url")
             adaptation.cover_status = "error"
+            adaptation.cover_last_error = "no_image_url"
             session.commit()
             return {"status": "error", "reason": "no_image_url"}
 

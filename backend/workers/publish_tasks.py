@@ -4,10 +4,14 @@ Tasks are thin orchestrators: load session → call service → handle retries.
 All business logic lives in app.services.publish_service.
 """
 
+from datetime import datetime, timezone
+
 import structlog
 from celery import shared_task
+from sqlalchemy import select
 
 from app.database import get_sync_session
+from app.models.autopilot_queue import AutopilotQueueItem
 from app.services.publish_service import PublishError, PublishRetryError, PublishService
 
 log = structlog.get_logger()
@@ -32,6 +36,24 @@ def publish_to_telegram(self, publish_job_id: str):
         service = PublishService(session)
         try:
             result = service.execute(publish_job_id)
+
+            # Update autopilot queue item if this was an autopilot publish
+            queue_item = session.execute(
+                select(AutopilotQueueItem).where(
+                    AutopilotQueueItem.publish_job_id == publish_job_id,
+                    AutopilotQueueItem.status == "publishing",
+                )
+            ).scalar_one_or_none()
+            if queue_item:
+                queue_item.status = "published"
+                queue_item.published_at = datetime.now(timezone.utc)
+                session.commit()
+                log.info(
+                    "autopilot.queue_item_published",
+                    queue_item_id=str(queue_item.id),
+                    job_id=publish_job_id,
+                )
+
             return {"status": "published", **result}
 
         except PublishRetryError as e:
