@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     kling_access_key: str = ""
     kling_secret_key: str = ""
 
+    # ── ReVid (Video Digest) ──────────────────────
+    revid_api_key: str = ""
+    revid_voice_id: str = "Qvbf0AoA7UZSgJUp8Ba5"
+    revid_avatar_url: str = ""   # Public URL of the avatar image
+    revid_aspect_ratio: str = "9:16"
+    revid_quality: str = "pro"
+
     # ── CORS ──────────────────────────────────────
     cors_origins: list[str] = ["*"]
 

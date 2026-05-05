@@ -36,6 +36,7 @@ celery_app.conf.update(
         "workers.publish_tasks.*": {"queue": "publish_queue"},
         "workers.media_tasks.*": {"queue": "media_queue"},
         "workers.analytics_tasks.*": {"queue": "analytics_queue"},
+        "digest.*": {"queue": "ai_queue"},
     },
 
     # Default queue
@@ -85,4 +86,5 @@ celery_app.conf.include = [
     "workers.scrape_tasks",
     "workers.ai_tasks",
     "workers.publish_tasks",
+    "workers.digest_tasks",
 ]

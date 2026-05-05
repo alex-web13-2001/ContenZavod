@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { CzPageHeader, CzTabs, CzSkeleton, useToast } from "@/components/ui-system";
-import { ArrowLeft, Sparkles, Send, Settings } from "lucide-react";
+import { ArrowLeft, Sparkles, Send, Settings, Film } from "lucide-react";
 import Link from "next/link";
 
 import { Project, Channel, Material, Adaptation, PipelineCounts } from "./_components/types";
@@ -431,12 +431,21 @@ export default function ProjectDetailPage() {
 
       {/* Header */}
       <CzPageHeader title={project.name} subtitle={project.description}>
-        <div className="cz-flex-center cz-flex-shrink-0" style={{
-          width: 44, height: 44, borderRadius: "var(--cz-radius-md)",
-          background: "linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))",
-          color: "white", fontSize: 18, fontWeight: 700,
-        }}>
-          {project.name.charAt(0).toUpperCase()}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="cz-flex-center cz-flex-shrink-0" style={{
+            width: 44, height: 44, borderRadius: "var(--cz-radius-md)",
+            background: "linear-gradient(135deg, hsl(var(--cz-primary)), hsl(var(--cz-accent)))",
+            color: "white", fontSize: 18, fontWeight: 700,
+          }}>
+            {project.name.charAt(0).toUpperCase()}
+          </div>
+          <Link
+            href={`/projects/${projectId}/digests`}
+            className="cz-btn cz-btn-ghost"
+            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, textDecoration: "none" }}
+          >
+            <Film size={16} /> Видео-дайджесты
+          </Link>
         </div>
       </CzPageHeader>
 
