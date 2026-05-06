@@ -1,7 +1,8 @@
 # ContenZavod — Схема базы данных
 
-> Последнее обновление: 2026-04-18
+> Последнее обновление: 2026-05-06
 > Миграции: Alembic (backend/migrations/)
+> Всего таблиц: 17
 
 ## Общие принципы
 
@@ -259,6 +260,76 @@ AI-скоринг материалов для каналов (legacy, замен
 | performance_stats | JSONB | |
 | created_at | TIMESTAMPTZ | |
 
+### video_digests ✨
+AI-видеодайджесты — аватар зачитывает новости.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | UUID PK | |
+| tenant_id | UUID FK | |
+| project_id | UUID FK → projects | CASCADE |
+| title | VARCHAR(500) | «Дайджест — 5 мая 2026 г.» |
+| script_text | TEXT | Сценарий с `[scene]` и `<break>` тегами |
+| language | VARCHAR(10) | ru / en |
+| material_ids | JSONB | Список UUID материалов-источников |
+| revid_pid | VARCHAR(100) | ID процесса ReVid |
+| revid_status | VARCHAR(30) | draft → script_generating → script_ready → rendering → ready / failed |
+| video_url | TEXT | CDN URL готового видео |
+| thumbnail_url | TEXT | Превью |
+| config | JSONB | render_config + legacy fields (see below) |
+| duration_seconds | INTEGER | |
+| credits_used | INTEGER | Потраченные кредиты ReVid |
+| error_message | TEXT | Описание ошибки |
+| created_at | TIMESTAMPTZ | |
+| updated_at | TIMESTAMPTZ | |
+
+**config JSONB structure:**
+```json
+{
+  "render_config": {
+    "mediaType": "custom",
+    "mediaDensity": "medium",
+    "removeBackground": true,
+    "avatarUrl": "https://cdn.revid.ai/...",
+    "voiceId": "Qvbf0AoA7UZSgJUp8Ba5",
+    "voiceSpeed": 1,
+    "captionsEnabled": true,
+    "providedMedia": [
+      {"url": "https://...", "title": "scene desc", "type": "image"}
+    ]
+  }
+}
+```
+
+### autopilot_queue ✨
+Очередь автопилота — AI-ранжированные элементы для автоматической публикации.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | UUID PK | |
+| tenant_id | UUID FK | |
+| channel_id | UUID FK → channels | CASCADE |
+| adaptation_id | UUID FK → channel_adaptations | CASCADE |
+| project_id | UUID FK → projects | CASCADE |
+| final_score | NUMERIC(5,2) | Итоговый балл ранжирования |
+| freshness_score | NUMERIC(5,2) | Свежесть (0-10) |
+| uniqueness_score | NUMERIC(5,2) | Уникальность (0-10) |
+| engagement_predict | NUMERIC(5,2) | Прогноз вовлечения (0-10) |
+| strategy | VARCHAR(20) | express / smart_queue |
+| scheduled_at | TIMESTAMPTZ | Запланированное время публикации |
+| status | VARCHAR(20) | queued → publishing → published / skipped / expired |
+| skip_reason | TEXT | Причина пропуска |
+| published_at | TIMESTAMPTZ | |
+| publish_job_id | UUID FK → publish_jobs | SET NULL |
+| created_at | TIMESTAMPTZ | |
+| updated_at | TIMESTAMPTZ | |
+
+**Shadow mode lifecycle:**
+```
+shadow → approved → publishing → published
+                  → rejected
+```
+
 ## Ключевые индексы
 
 ```sql
@@ -273,6 +344,18 @@ CREATE INDEX idx_publish_jobs_scheduled ON publish_jobs(scheduled_at) WHERE stat
 
 -- Метрики
 CREATE INDEX idx_metrics_pub_period ON publication_metrics(publish_job_id, snapshot_period);
+
+-- Видео-дайджесты
+CREATE INDEX idx_digests_project ON video_digests(project_id);
+CREATE INDEX idx_digests_status ON video_digests(revid_status);
+
+-- Автопилот
+CREATE INDEX idx_autopilot_tenant_status ON autopilot_queue(tenant_id, status);
+CREATE INDEX idx_autopilot_scheduled ON autopilot_queue(scheduled_at)
+  WHERE status IN ('queued', 'approved');
+CREATE INDEX idx_autopilot_channel_status ON autopilot_queue(channel_id, status);
+CREATE UNIQUE INDEX uq_autopilot_active_adaptation ON autopilot_queue(adaptation_id, channel_id)
+  WHERE status IN ('queued', 'shadow', 'approved', 'publishing');
 ```
 
 ## Миграции
@@ -283,3 +366,4 @@ make db-migrate msg="описание изменения"   # Создать м�
 make db-upgrade                             # Применить
 make db-downgrade                           # Откатить
 ```
+

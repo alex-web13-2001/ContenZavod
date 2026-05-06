@@ -1,6 +1,6 @@
 # ContenZavod — API Reference
 
-> Последнее обновление: 2026-04-18
+> Последнее обновление: 2026-05-06
 > Base URL: `http://localhost:8000/api/v1`
 
 ## Аутентификация
@@ -34,6 +34,15 @@ Authorization: Bearer <access_token>
 |------|-----|-------------|
 | email | string | ✅ |
 | password | string | ✅ |
+
+**Response:** `200` → `{ access_token, refresh_token, token_type }`
+
+### `POST /auth/refresh`
+Обновление JWT-токена.
+
+| Поле | Тип | Обязательно |
+|------|-----|-------------|
+| refresh_token | string | ✅ |
 
 **Response:** `200` → `{ access_token, refresh_token, token_type }`
 
@@ -154,25 +163,6 @@ Authorization: Bearer <access_token>
 
 **Response:** `200` → `{ items: Recommendation[], total, page, per_page, pages }`
 
-Каждая рекомендация включает:
-```json
-{
-  "score_id": "uuid",
-  "material_id": "uuid",
-  "material_title": "...",
-  "material_url": "...",
-  "relevance_score": 8,
-  "hype_score": 6,
-  "explanation": "...",
-  "is_recommended": true,
-  "material_status": "classified",
-  "source_name": "CyprusMail",
-  "category": "Экономика",
-  "material_summary": "...",
-  "material_created_at": "..."
-}
-```
-
 ### `GET /projects/{project_id}/categories`
 Уникальные рубрики материалов в проекте (для фильтра).
 
@@ -246,6 +236,160 @@ Authorization: Bearer <access_token>
 | content_format | string | ✅ | short_post / longread / video_script / digest |
 
 **Response:** `202` → `{ message, task_id }`
+
+---
+
+## Video Digests 🎬
+
+AI-видеодайджесты через ReVid API v3. Полный цикл: создание → генерация скрипта → рендер видео.
+
+### `GET /digests?project_id={uuid}`
+Список дайджестов проекта.
+
+**Response:** `200` → `VideoDigest[]`
+
+### `GET /digests/{digest_id}`
+Один дайджест. **Автоматически проверяет статус** ReVid при `revid_status == "rendering"`.
+
+**Response:** `200` → `VideoDigest`
+
+> **⚡ Auto-polling:** Если дайджест в статусе `rendering`, GET-запрос
+> автоматически опрашивает ReVid API, обновляет `video_url` и `revid_status`
+> в БД, и возвращает актуальные данные.
+
+### `POST /digests`
+Создать дайджест.
+
+| Поле | Тип | Обязательно | Описание |
+|------|-----|-------------|----------|
+| project_id | UUID | ✅ | Проект |
+| title | string | ✅ | «Дайджест — 5 мая 2026 г.» |
+| material_ids | UUID[] | ✅ | Массив ID материалов |
+| language | string | — | "ru" (default) |
+| config | object | — | render_config (см. ниже) |
+
+### `PATCH /digests/{digest_id}`
+Обновить дайджест (скрипт, заголовок).
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| title | string | Заголовок |
+| script_text | string | Текст сценария |
+| config | object | render_config |
+
+### `DELETE /digests/{digest_id}`
+Удалить дайджест.
+
+**Response:** `204 No Content`
+
+### `POST /digests/{digest_id}/generate-script`
+Запустить AI-генерацию сценария из выбранных материалов.
+
+**Response:** `202` → `{ message, task_id }`
+
+Статус переходит: `draft` → `script_generating` → `script_ready`
+
+### `POST /digests/{digest_id}/render`
+Запустить рендер видео через ReVid API.
+
+| Поле | Тип | Обязательно | Описание |
+|------|-----|-------------|----------|
+| render_config | object | — | Настройки рендера |
+
+**render_config structure:**
+```json
+{
+  "mediaType": "custom",          // custom | stock-video | ai-image | ai-video | moving-image | video
+  "mediaDensity": "medium",       // low | medium | high
+  "mediaImageModel": "good",      // good | best
+  "videoModel": "base",           // base | pro
+  "removeBackground": true,
+  "avatarUrl": "https://cdn.revid.ai/uploads/xxx.png",
+  "voiceId": "Qvbf0AoA7UZSgJUp8Ba5",
+  "voiceSpeed": 1,
+  "captionsEnabled": true,
+  "captionsAnimation": "word",    // word | sentence | line
+  "aspectRatio": "9:16",          // 9:16 | 16:9 | 1:1
+  "quality": "pro",               // base | pro
+  "providedMedia": [
+    {"url": "https://...", "title": "описание сцены", "type": "image"}
+  ]
+}
+```
+
+**Response:** `202` → `{ message, task_id }`
+
+Статус переходит: `script_ready` → `rendering` → `ready`
+
+> **Нормализация media type:** Бэкенд автоматически маппит невалидные значения:
+> `"provided"` → `"custom"`, `"stock-image"` → `"moving-image"`
+
+### `GET /digests/{digest_id}/credits`
+Проверить баланс кредитов ReVid.
+
+**Response:** `200` → `{ total_credits, used_credits, remaining }`
+
+---
+
+## Autopilot 🤖
+
+Автоматическая AI-ранжированная публикация контента.
+
+### `GET /autopilot/queue?project_id={uuid}`
+Очередь автопилота для проекта.
+
+| Параметр | Тип | По умолчанию | Описание |
+|----------|-----|--------------|----------|
+| project_id | UUID | ✅ | Проект |
+| status | string | — | Фильтр: queued / published / skipped / expired |
+| page | int | 1 | |
+| per_page | int | 50 | |
+
+**Response:** `200` → `{ items: AutopilotQueueItem[], total }`
+
+### `PATCH /autopilot/queue/{item_id}`
+Обновить элемент очереди (одобрить/отклонить в shadow mode).
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| status | string | approved / rejected / skipped |
+
+### `DELETE /autopilot/queue/{item_id}`
+Удалить элемент из очереди.
+
+### `GET /autopilot/config?project_id={uuid}`
+Конфигурация автопилота для проекта.
+
+### `PATCH /autopilot/config`
+Обновить конфигурацию автопилота.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| project_id | UUID | ✅ |
+| enabled | bool | Включить/выключить |
+| shadow_mode | bool | Требовать одобрения |
+| max_posts_per_day | int | Лимит публикаций |
+| language_limits | object | `{ "ru": 3, "en": 2 }` |
+
+### `POST /autopilot/trigger`
+Принудительный запуск цикла ранжирования.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| project_id | UUID | ✅ |
+
+**Response:** `202` → `{ message }`
+
+---
+
+## Files
+
+### `POST /files/upload`
+Загрузка файлов в MinIO.
+
+**Content-Type:** `multipart/form-data`
+
+**Response:** `200` → `{ url, filename, size }`
 
 ---
 
