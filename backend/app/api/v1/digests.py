@@ -108,7 +108,8 @@ async def get_digest(
     if digest.revid_status == "rendering" and digest.revid_pid:
         try:
             from integrations.revid import RevidClient
-            from app.core.config import settings
+            from app.config import get_settings
+            settings = get_settings()
             client = RevidClient(api_key=settings.revid_api_key)
             revid_data = client.check_status(digest.revid_pid)
 
@@ -124,8 +125,9 @@ async def get_digest(
                 digest.error_message = revid_data.get("error", "ReVid render failed")
                 await db.commit()
                 await db.refresh(digest)
-        except Exception:
-            pass  # Don't break the GET if ReVid check fails
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("ReVid status check failed: %s", exc)
 
     return DigestResponse.model_validate(digest)
 

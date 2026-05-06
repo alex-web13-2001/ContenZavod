@@ -107,7 +107,7 @@ def render_digest_video_task(self, digest_id: str) -> dict:
             if config.get("provided_media"):
                 rc["providedMedia"] = config["provided_media"]
             if config.get("use_only_provided"):
-                rc["mediaType"] = "provided"
+                rc["mediaType"] = "custom"
             if "cutout_avatar" in config:
                 rc["removeBackground"] = config["cutout_avatar"]
             if config.get("avatar_image_model"):

@@ -50,13 +50,24 @@ class RevidClient:
 
         provided_media = rc.get("providedMedia") or []
 
+        # Normalize media type — map legacy/invalid values to valid ReVid API types
+        MEDIA_TYPE_MAP = {
+            "provided": "custom",
+            "stock-image": "moving-image",
+        }
+        VALID_MEDIA_TYPES = {"stock-video", "video", "moving-image", "ai-image", "ai-video", "custom"}
+        raw_media_type = rc.get("mediaType", "stock-video")
+        media_type = MEDIA_TYPE_MAP.get(raw_media_type, raw_media_type)
+        if media_type not in VALID_MEDIA_TYPES:
+            media_type = "stock-video"
+
         payload: dict = {
             "workflow": "avatar-to-video",
             "source": {
                 "text": script,
             },
             "media": {
-                "type": rc.get("mediaType", "stock-video"),
+                "type": media_type,
                 "density": rc.get("mediaDensity", "medium"),
                 "imageModel": rc.get("mediaImageModel", "good"),
                 "videoModel": rc.get("videoModel", "base"),
@@ -103,8 +114,11 @@ class RevidClient:
             "revid.render.submit",
             workflow="avatar-to-video",
             script_len=len(script),
-            aspect_ratio=aspect_ratio,
+            aspect_ratio=payload.get("aspectRatio"),
+            media_type=payload["media"]["type"],
+            provided_count=len(provided_media),
         )
+        log.debug("revid.render.payload", payload=payload)
 
         resp = httpx.post(
             f"{REVID_BASE}/render",
@@ -113,8 +127,18 @@ class RevidClient:
             timeout=30.0,
             follow_redirects=True,
         )
-        resp.raise_for_status()
+
         data = resp.json()
+
+        if resp.status_code >= 400:
+            error_detail = data.get("error") or data.get("message") or resp.text
+            log.error(
+                "revid.render.http_error",
+                status_code=resp.status_code,
+                error=error_detail,
+                response_body=data,
+            )
+            raise ValueError(f"ReVid {resp.status_code}: {error_detail}")
 
         if data.get("success") != 1:
             log.error("revid.render.failed", error=data.get("error"))

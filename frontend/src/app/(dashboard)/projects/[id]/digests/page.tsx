@@ -364,10 +364,11 @@ export default function DigestsPage() {
                         <label style={S.lbl}>Тип медиа</label>
                         <select value={vs.mediaType} onChange={e => setVs({ mediaType: e.target.value })} style={S.sel}>
                           <option value="stock-video">Stock Video</option>
-                          <option value="stock-image">Stock Image</option>
+                          <option value="video">Video</option>
+                          <option value="moving-image">Moving Image</option>
                           <option value="ai-image">AI Image</option>
                           <option value="ai-video">AI Video</option>
-                          <option value="provided">Только мои</option>
+                          <option value="custom">Только мои</option>
                         </select>
                       </div>
                       <div>
