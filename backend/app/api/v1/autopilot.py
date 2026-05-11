@@ -22,6 +22,7 @@ from app.api.deps import get_current_user_id, get_db, get_tenant_id
 from app.models.autopilot_queue import AutopilotQueueItem
 from app.models.channel import Channel
 from app.models.channel_adaptation import ChannelAdaptation
+from app.models.material import RawMaterial
 
 router = APIRouter(prefix="/projects/{project_id}/autopilot", tags=["autopilot"])
 
@@ -44,11 +45,24 @@ class AutopilotConfigUpdate(BaseModel):
     language_settings: dict | None = None  # Per-language overrides
     format_ratios: dict | None = None  # {"flash": 0.4, "short_post": 0.4, "longread": 0.2}
     longread_max_per_day: int | None = None
+    max_material_age_hours: int | None = None  # ADR-007: hard freshness cutoff
 
 
 class QueueActionRequest(BaseModel):
     """Request body for approving/rejecting a queue item."""
     queue_item_id: str
+
+
+class EnqueueRequest(BaseModel):
+    """Request body for manual enqueue from Recommendations.
+
+    The user explicitly chose channel + format, bypassing ratio balancing.
+    Language is derived from the chosen channel's primary language.
+    """
+    material_id: str
+    channel_id: str
+    content_format: str
+    language: str | None = None  # If None, uses channel's first language
 
 
 # --- Endpoints ---
@@ -93,6 +107,7 @@ async def get_autopilot_config(
                     "flash": 0.40, "short_post": 0.40, "longread": 0.20,
                 }),
                 "longread_max_per_day": config.get("longread_max_per_day", 2),
+                "max_material_age_hours": config.get("max_material_age_hours", 24),
             },
         })
 
@@ -162,12 +177,28 @@ async def get_autopilot_queue(
 
     items = (await session.execute(query)).scalars().all()
 
+    # Bulk-fetch source materials for material_id → freshness dates
+    material_ids = {item.adaptation.material_id for item in items if item.adaptation}
+    materials_map: dict = {}
+    if material_ids:
+        rows = (await session.execute(
+            select(
+                RawMaterial.id,
+                RawMaterial.published_at,
+                RawMaterial.scraped_at,
+            ).where(RawMaterial.id.in_(material_ids))
+        )).all()
+        materials_map = {m_id: (pub, scr) for m_id, pub, scr in rows}
+
     result = []
     for item in items:
         adapt = item.adaptation
         ch = item.channel
 
         body_text = adapt.body if adapt else ""
+        mat_published_at, mat_scraped_at = materials_map.get(
+            adapt.material_id if adapt else None, (None, None)
+        )
         result.append({
             "id": str(item.id),
             "channel_id": str(item.channel_id),
@@ -186,9 +217,56 @@ async def get_autopilot_queue(
             "status": item.status,
             "scheduled_at": item.scheduled_at.isoformat() if item.scheduled_at else None,
             "created_at": item.created_at.isoformat(),
+            "material_published_at": mat_published_at.isoformat() if mat_published_at else None,
+            "material_scraped_at": mat_scraped_at.isoformat() if mat_scraped_at else None,
         })
 
     return {"items": result, "total": len(result)}
+
+
+@router.post("/enqueue")
+async def enqueue_material_to_autopilot(
+    project_id: str,
+    body: EnqueueRequest,
+    session: AsyncSession = Depends(get_db),
+    _user: str = Depends(get_current_user_id),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """Manually enqueue a material into the autopilot queue for a specific channel/format.
+
+    Triggered from Recommendations UI when the editor wants to bypass the
+    automatic ranking and force a material into the queue.
+    """
+    # Validate that the channel belongs to the project and tenant
+    channel = await session.get(Channel, uuid.UUID(body.channel_id))
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+    if str(channel.project_id) != project_id or str(channel.tenant_id) != tenant_id:
+        raise HTTPException(403, "Channel does not belong to this project/tenant")
+
+    # Validate content_format
+    allowed_formats = channel.content_formats or ["short_post"]
+    if body.content_format not in allowed_formats:
+        raise HTTPException(
+            400,
+            f"Format '{body.content_format}' not in channel.content_formats {allowed_formats}",
+        )
+
+    # Resolve language
+    language = body.language or (channel.languages[0] if channel.languages else "ru")
+    if language not in (channel.languages or []):
+        raise HTTPException(
+            400, f"Language '{language}' not in channel.languages {channel.languages}"
+        )
+
+    # Dispatch the adapt+enqueue Celery task
+    from workers.ai_tasks import adapt_and_enqueue_autopilot
+    task = adapt_and_enqueue_autopilot.delay(
+        body.material_id, body.channel_id, body.content_format,
+        language, tenant_id, project_id,
+    )
+
+    return {"status": "accepted", "task_id": task.id}
 
 
 @router.post("/approve")

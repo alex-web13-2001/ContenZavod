@@ -49,6 +49,7 @@ interface AutopilotChannelConfig {
     }>;
     format_ratios: Record<string, number>;
     longread_max_per_day: number;
+    max_material_age_hours: number;
   };
 }
 
@@ -70,6 +71,8 @@ interface QueueItem {
   status: string;
   scheduled_at: string | null;
   created_at: string;
+  material_published_at: string | null;
+  material_scraped_at: string | null;
 }
 
 interface AutopilotStats {
@@ -661,6 +664,19 @@ function ChannelConfigCard({
                   onChange={(e) => setLocalConfig({ ...localConfig, longread_max_per_day: Number(e.target.value) })}
                 />
               </div>
+              <div className="ap-setting">
+                <label className="cz-form-label" title="Материалы старше этого возраста никогда не попадут в очередь автопилота">
+                  Свежесть, часов
+                </label>
+                <input
+                  type="number"
+                  className="cz-input focus-ring ap-input--compact"
+                  value={localConfig.max_material_age_hours}
+                  min={1}
+                  max={168}
+                  onChange={(e) => setLocalConfig({ ...localConfig, max_material_age_hours: Number(e.target.value) })}
+                />
+              </div>
             </div>
           </div>
 
@@ -711,6 +727,29 @@ function QueueItemCard({
     ? new Date(item.scheduled_at).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })
     : "—";
 
+  // Material freshness — prefer source publication date, fallback to scrape time
+  const materialIso = item.material_published_at || item.material_scraped_at;
+  const materialFreshness = (() => {
+    if (!materialIso) return null;
+    const d = new Date(materialIso);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffH = diffMs / 3600000;
+    const isToday = d.toDateString() === now.toDateString();
+    const isYesterday = d.toDateString() === new Date(now.getTime() - 86400000).toDateString();
+    const time = d.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
+    let label: string;
+    if (isToday) label = `сегодня ${time}`;
+    else if (isYesterday) label = `вчера ${time}`;
+    else label = d.toLocaleDateString("ru", { day: "numeric", month: "short" }) + ` ${time}`;
+    // Color: fresh (<6h) → success, medium (<24h) → muted, stale → warning
+    const color =
+      diffH < 6 ? "var(--cz-success)" :
+      diffH < 24 ? "var(--cz-text-muted)" :
+      "var(--cz-warning)";
+    return { label, color };
+  })();
+
   const coverIcon = () => {
     if (!item.cover_status || item.cover_status === "none") return null;
     if (item.cover_status === "ready") return <Image size={12} style={{ color: "hsl(var(--cz-success))" }} />;
@@ -750,7 +789,16 @@ function QueueItemCard({
             {item.content_format === "flash" ? (item.body_preview || "⚡ Flash") : (item.headline || "Без заголовка")}
           </div>
           <div className="ap-queue-meta">
-            <span className="ap-queue-meta-item">
+            {materialFreshness && (
+              <span
+                className="ap-queue-meta-item"
+                style={{ color: `hsl(${materialFreshness.color})` }}
+                title="Когда опубликован материал"
+              >
+                📰 {materialFreshness.label}
+              </span>
+            )}
+            <span className="ap-queue-meta-item" title="Когда автопилот опубликует">
               <Clock size={11} /> {scheduledTime}
             </span>
             <span className="ap-queue-meta-item" style={{ textTransform: "uppercase" }}>

@@ -42,6 +42,7 @@ celery_app.conf.update(
         "workers.autopilot_tasks.autopilot_publish_next": {"queue": "publish_queue"},
         "workers.autopilot_tasks.autopilot_retry_covers": {"queue": "media_queue"},
         "workers.autopilot_tasks.autopilot_expire_stale": {"queue": "ai_queue"},
+        "workers.autopilot_tasks.autopilot_archive_stale_drafts": {"queue": "ai_queue"},
     },
 
     # Default queue
@@ -107,6 +108,12 @@ celery_app.conf.beat_schedule = {
     "autopilot-expire-stale": {
         "task": "workers.autopilot_tasks.autopilot_expire_stale",
         "schedule": crontab(minute=0),
+        "options": {"queue": "ai_queue"},
+    },
+    # Archive draft adaptations whose source material is stale (every hour, offset 30 min)
+    "autopilot-archive-stale-drafts": {
+        "task": "workers.autopilot_tasks.autopilot_archive_stale_drafts",
+        "schedule": crontab(minute=30),
         "options": {"queue": "ai_queue"},
     },
 }

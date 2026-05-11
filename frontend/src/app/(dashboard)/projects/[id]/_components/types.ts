@@ -85,6 +85,7 @@ export const platformConfig: Record<string, { icon: typeof Send; label: string; 
 };
 
 export const formatLabels: Record<string, string> = {
+  flash: "Молния",
   short_post: "Пост",
   longread: "Лонгрид",
   video_script: "Видео-скрипт",

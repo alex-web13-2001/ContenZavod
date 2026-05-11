@@ -536,6 +536,140 @@ def adapt_single_format(
 
 @shared_task(
     bind=True,
+    name="workers.ai_tasks.adapt_and_enqueue_autopilot",
+    max_retries=3,
+)
+def adapt_and_enqueue_autopilot(
+    self,
+    material_id: str,
+    channel_id: str,
+    content_format: str,
+    language: str,
+    tenant_id: str,
+    project_id: str,
+):
+    """Manual enqueue from Recommendations: adapt if needed, then queue.
+
+    Used when an editor clicks "Send to autopilot" on a recommendation card.
+    Bypasses the rank_and_queue ratio balancing — the user explicitly chose
+    this material/channel/format combination.
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from app.models.autopilot_queue import AutopilotQueueItem
+    from app.models.channel import Channel
+    from app.models.channel_adaptation import ChannelAdaptation
+
+    log = logger.bind(
+        material_id=material_id, channel_id=channel_id,
+        content_format=content_format, language=language,
+    )
+    log.info("autopilot.manual_enqueue.start")
+
+    with get_sync_session() as session:
+        # Find or create adaptation
+        adaptation = session.execute(
+            select(ChannelAdaptation).where(
+                ChannelAdaptation.material_id == uuid.UUID(material_id),
+                ChannelAdaptation.channel_id == uuid.UUID(channel_id),
+                ChannelAdaptation.language == language,
+                ChannelAdaptation.content_format == content_format,
+            )
+        ).scalar_one_or_none()
+
+        if not adaptation:
+            # Synchronously generate the adaptation via existing helper
+            log.info("autopilot.manual_enqueue.generating_adaptation")
+            from ai.adapter import adapt_material_for_channel, AIServiceTemporarilyUnavailable
+
+            material = session.get(RawMaterial, uuid.UUID(material_id))
+            channel = session.get(Channel, uuid.UUID(channel_id))
+            if not material or not channel:
+                log.error("autopilot.manual_enqueue.missing_entity")
+                return {"status": "error", "reason": "not_found"}
+
+            ai_data = material.metadata_.get("ai_classification", {})
+            material_data = {
+                "original_title": material.title,
+                "summary_ru": ai_data.get("summary_ru"),
+                "summary_en": ai_data.get("summary_en"),
+                "content_text": material.content_text,
+                "original_url": material.original_url,
+            }
+            try:
+                result = _run_async(adapt_material_for_channel(
+                    material_data=material_data,
+                    channel_name=channel.name,
+                    channel_type=channel.channel_type,
+                    content_format=content_format,
+                    tone_of_voice=channel.tone_of_voice,
+                    language=language,
+                    formatting_rules=channel.formatting_rules,
+                    editorial_rules=channel.editorial_rules,
+                ))
+            except AIServiceTemporarilyUnavailable as e:
+                raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+
+            if not result:
+                log.error("autopilot.manual_enqueue.adapt_empty")
+                return {"status": "error", "reason": "adapt_failed"}
+
+            adaptation = ChannelAdaptation(
+                material_id=material.id,
+                channel_id=channel.id,
+                tenant_id=material.tenant_id,
+                language=language,
+                content_format=content_format,
+                headline=result.get("headline", ""),
+                body=result.get("body", ""),
+                priority=result.get("priority", "normal"),
+                status="draft",
+            )
+            session.add(adaptation)
+            session.flush()
+            log.info("autopilot.manual_enqueue.adaptation_created", adaptation_id=str(adaptation.id))
+
+        # Prevent duplicate active queue items for this adaptation+channel
+        existing_queue = session.execute(
+            select(AutopilotQueueItem).where(
+                AutopilotQueueItem.adaptation_id == adaptation.id,
+                AutopilotQueueItem.channel_id == uuid.UUID(channel_id),
+                AutopilotQueueItem.status.in_(["queued", "shadow", "approved", "publishing"]),
+            )
+        ).scalar_one_or_none()
+        if existing_queue:
+            log.info("autopilot.manual_enqueue.already_queued", queue_item_id=str(existing_queue.id))
+            return {"status": "ok", "queue_item_id": str(existing_queue.id), "already_existed": True}
+
+        # Create queue item, bypassing ratio balancing
+        queue_item = AutopilotQueueItem(
+            tenant_id=uuid.UUID(tenant_id),
+            channel_id=uuid.UUID(channel_id),
+            adaptation_id=adaptation.id,
+            project_id=uuid.UUID(project_id),
+            final_score=8.0,  # Manual nominal score
+            freshness_score=10.0,
+            uniqueness_score=10.0,
+            engagement_predict=5.0,
+            strategy="express",  # Express skips shadow + cover wait
+            scheduled_at=_dt.now(_tz.utc) + _td(minutes=2),
+            status="queued",
+        )
+        session.add(queue_item)
+        session.commit()
+
+        # Dispatch cover generation if not flash
+        if content_format != "flash" and not adaptation.cover_status:
+            adaptation.cover_status = "generating"
+            adaptation.cover_retry_count = 0
+            session.commit()
+            generate_adaptation_cover.delay(str(adaptation.id), tenant_id)
+
+        log.info("autopilot.manual_enqueue.queued", queue_item_id=str(queue_item.id))
+        return {"status": "ok", "queue_item_id": str(queue_item.id), "adaptation_id": str(adaptation.id)}
+
+
+@shared_task(
+    bind=True,
     name="workers.ai_tasks.generate_cover_image",
     max_retries=2,
     queue="media_queue",

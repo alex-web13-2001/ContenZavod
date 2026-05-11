@@ -12,6 +12,7 @@ import { RecommendationsTab } from "./_components/RecommendationsTab";
 import { ChannelsTab } from "./_components/ChannelsTab";
 import { SettingsTab } from "./_components/SettingsTab";
 import { AutopilotTab } from "./_components/AutopilotTab";
+import { EnqueueAutopilotDialog } from "./_components/EnqueueAutopilotDialog";
 
 const TAB_OPTIONS = [
   { key: "recommendations" as const, label: "Рекомендации", icon: Sparkles },
@@ -39,6 +40,10 @@ export default function ProjectDetailPage() {
   const [exitingCards, setExitingCards] = useState<Set<string>>(new Set());
   const initialLoadDone = useRef(false);
   const { showToast } = useToast();
+
+  // Autopilot enqueue dialog state
+  const [autopilotDialogMaterial, setAutopilotDialogMaterial] = useState<Material | null>(null);
+  const [enqueueingAutopilot, setEnqueueingAutopilot] = useState(false);
 
   // Pipeline state
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>("inbox");
@@ -162,6 +167,48 @@ export default function ProjectDetailPage() {
       showToast("Ошибка при перемещении", "error");
       setExitingCards((prev) => { const next = new Set(prev); next.delete(scoreId); return next; });
       fetchRecommendationsAndAdaptations({ silent: true });
+    }
+  };
+
+  /* ────── Autopilot: manual enqueue from Recommendations ────── */
+  const handleEnqueueAutopilot = async (
+    channelId: string,
+    contentFormat: string,
+    language: string,
+  ) => {
+    if (!autopilotDialogMaterial) return;
+    const material = autopilotDialogMaterial;
+    const realMaterialId = material.material_id || material.id;
+    setEnqueueingAutopilot(true);
+    try {
+      await api.post(`/projects/${projectId}/autopilot/enqueue`, {
+        material_id: realMaterialId,
+        channel_id: channelId,
+        content_format: contentFormat,
+        language,
+      });
+      showToast("⚡ Материал отправлен в очередь автопилота", "success");
+      setAutopilotDialogMaterial(null);
+      // Animate card out and move to in_progress
+      setExitingCards((prev) => new Set(prev).add(material.id));
+      setTimeout(() => {
+        setMaterials((prev) => prev.filter((m) => m.id !== material.id));
+        setExitingCards((prev) => { const next = new Set(prev); next.delete(material.id); return next; });
+        setPipelineCounts((prev) => ({
+          ...prev,
+          inbox: Math.max(0, prev.inbox - 1),
+          in_progress: prev.in_progress + 1,
+        }));
+      }, 400);
+      // Also update the editorial status on the backend so the card moves stage
+      api.patch(`/projects/${projectId}/recommendations/${material.id}/status`, {
+        status: "in_progress",
+      }).catch((e) => console.error("status update failed", e));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Ошибка при постановке в очередь";
+      showToast(msg, "error");
+    } finally {
+      setEnqueueingAutopilot(false);
     }
   };
 
@@ -481,8 +528,25 @@ export default function ProjectDetailPage() {
           generatingCovers={generatingCovers}
           onRegenerate={handleRegenerate}
           regeneratingScores={regeneratingScores}
+          onSendToAutopilot={(m) => setAutopilotDialogMaterial(m)}
         />
       )}
+
+      {/* Autopilot enqueue dialog */}
+      <EnqueueAutopilotDialog
+        open={!!autopilotDialogMaterial}
+        onClose={() => setAutopilotDialogMaterial(null)}
+        channels={channels}
+        materialTitle={
+          autopilotDialogMaterial?.headline_ru
+          || autopilotDialogMaterial?.material_title
+          || autopilotDialogMaterial?.title
+          || "Без заголовка"
+        }
+        onEnqueue={handleEnqueueAutopilot}
+        submitting={enqueueingAutopilot}
+      />
+
 
       {tab === "channels" && (
         <ChannelsTab

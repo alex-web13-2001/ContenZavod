@@ -65,10 +65,12 @@ function formatStat(n: number | null | undefined): string {
 }
 
 /* ═══ 1. INBOX CARD — clean, no adaptations ═══ */
-export function InboxCard({ m, onTake, onReject }: {
+export function InboxCard({ m, onTake, onReject, onAutopilot }: {
   m: Material;
   onTake: (id: string) => void;
   onReject: (id: string) => void;
+  /** Optional: open "send to autopilot" dialog for this material. */
+  onAutopilot?: (id: string) => void;
 }) {
   const cat = m.category ? categoryLabels[m.category] : null;
   const title = resolveTitle(m);
@@ -115,6 +117,13 @@ export function InboxCard({ m, onTake, onReject }: {
             border: "1px solid hsl(var(--cz-border) / 0.5)", cursor: "pointer", fontSize: 13, fontWeight: 600,
             backgroundColor: "transparent", color: "hsl(var(--cz-text-muted))",
           }}><X size={14} /> Отклонить</button>
+          {onAutopilot && (
+            <button onClick={() => onAutopilot(m.id)} style={{
+              display: "flex", alignItems: "center", gap: 5, padding: "8px 16px", borderRadius: 8,
+              border: "1px solid hsl(var(--cz-warning) / 0.4)", cursor: "pointer", fontSize: 13, fontWeight: 700,
+              backgroundColor: "hsl(var(--cz-warning) / 0.08)", color: "hsl(var(--cz-warning))",
+            }} title="Поставить в очередь автопилота"><Zap size={14} /> В автопилот</button>
+          )}
           <button onClick={() => onTake(m.id)} style={{
             display: "flex", alignItems: "center", gap: 5, padding: "8px 18px", borderRadius: 8,
             border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700,

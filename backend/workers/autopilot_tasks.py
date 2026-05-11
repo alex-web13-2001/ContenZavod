@@ -74,6 +74,9 @@ def _get_autopilot_config(channel) -> dict:
         "language_settings": {},
         "format_ratios": DEFAULT_FORMAT_RATIOS,
         "longread_max_per_day": 2,
+        # Hard cutoff: materials older than this never enter the queue.
+        # Protects against publishing stale news when fresh content is scarce.
+        "max_material_age_hours": 24,
     }
     cfg = channel.autopilot_config or {}
     return {**defaults, **cfg}
@@ -381,12 +384,22 @@ def autopilot_rank_and_queue(self):
             ).scalars().all()
             already_published_materials = set(already_queued_material_ids)
 
+            # Hard freshness cutoff: never enqueue materials older than this.
+            # Configurable per-channel via autopilot_config.max_material_age_hours.
+            # Default 24h, see ADR-007.
+            max_age_hours = int(config.get("max_material_age_hours", 24))
+            age_cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+
             # Get draft adaptations for ALL allowed formats for this channel
+            # WHERE the underlying material is still within the freshness window.
             adaptations = session.execute(
-                select(ChannelAdaptation).where(
+                select(ChannelAdaptation)
+                .join(RawMaterial, ChannelAdaptation.material_id == RawMaterial.id)
+                .where(
                     ChannelAdaptation.channel_id == channel.id,
                     ChannelAdaptation.status == "draft",
                     ChannelAdaptation.content_format.in_(allowed_formats),
+                    RawMaterial.scraped_at >= age_cutoff,
                 )
             ).scalars().all()
 
@@ -414,38 +427,26 @@ def autopilot_rank_and_queue(self):
                 skip_material_ids = set(all_adapted_ids)
                 skip_material_ids.update(already_published_materials)
 
+                # Find top-scored recommended materials WITHOUT any adaptations,
+                # restricted to the freshness window (ADR-007).
+                from app.models.project_score import MaterialProjectScore as MPS_lazy
+
+                lazy_query = (
+                    select(MPS_lazy.material_id, MPS_lazy.project_id, RawMaterial.tenant_id)
+                    .join(RawMaterial, MPS_lazy.material_id == RawMaterial.id)
+                    .where(
+                        MPS_lazy.project_id == channel.project_id,
+                        MPS_lazy.is_recommended == True,
+                        RawMaterial.scraped_at >= age_cutoff,
+                    )
+                    .order_by((MPS_lazy.relevance_score + MPS_lazy.hype_score).desc())
+                    .limit(adapt_budget)
+                )
                 if skip_material_ids:
-                    # Find top-scored recommended materials WITHOUT any adaptations
-                    from app.models.project_score import MaterialProjectScore as MPS_lazy
-
-                    unadapted = session.execute(
-                        select(MPS_lazy.material_id, MPS_lazy.project_id, RawMaterial.tenant_id)
-                        .join(RawMaterial, MPS_lazy.material_id == RawMaterial.id)
-                        .where(
-                            MPS_lazy.project_id == channel.project_id,
-                            MPS_lazy.is_recommended == True,
-                            ~MPS_lazy.material_id.in_(skip_material_ids),
-                        )
-                        .order_by(
-                            (MPS_lazy.relevance_score + MPS_lazy.hype_score).desc()
-                        )
-                        .limit(adapt_budget)
-                    ).all()
-                else:
-                    from app.models.project_score import MaterialProjectScore as MPS_lazy
-
-                    unadapted = session.execute(
-                        select(MPS_lazy.material_id, MPS_lazy.project_id, RawMaterial.tenant_id)
-                        .join(RawMaterial, MPS_lazy.material_id == RawMaterial.id)
-                        .where(
-                            MPS_lazy.project_id == channel.project_id,
-                            MPS_lazy.is_recommended == True,
-                        )
-                        .order_by(
-                            (MPS_lazy.relevance_score + MPS_lazy.hype_score).desc()
-                        )
-                        .limit(adapt_budget)
-                    ).all()
+                    lazy_query = lazy_query.where(
+                        ~MPS_lazy.material_id.in_(skip_material_ids)
+                    )
+                unadapted = session.execute(lazy_query).all()
 
                 if unadapted:
                     from workers.ai_tasks import adapt_material_for_channels
@@ -527,15 +528,10 @@ def autopilot_rank_and_queue(self):
                     category,
                     ttl_overrides,
                 )
-
-                # Soft freshness floor — expired materials get moderate score
-                # instead of being dropped entirely. This prevents empty queues
-                # when no fresh content is available. The ranking system will
-                # naturally prioritize newer materials over stale ones.
-                # Floor of 5.0 ensures top-scoring materials (rel≥8, hype≥7)
-                # can still pass the threshold (7.0) even when expired.
-                if freshness <= 0:
-                    freshness = 5.0  # moderate penalty — won't starve the queue
+                # No artificial floor: materials past their category TTL get
+                # freshness = 0 and naturally fall below the score threshold.
+                # The hard max_material_age_hours filter above is what protects
+                # the queue from emptying — see ADR-007.
 
                 # Phase 2: Compute real uniqueness score via semantic fingerprint
                 fingerprint = (material.metadata_ or {}).get("semantic_fingerprint", [])
@@ -543,8 +539,11 @@ def autopilot_rank_and_queue(self):
                     material.id, fingerprint, session, adapt.tenant_id
                 )
 
-                # Skip near-duplicates (uniqueness < 2.0 = similarity > 0.8)
-                if uniqueness < 2.0:
+                # Skip near-duplicates: uniqueness < 4.0 ≈ similarity > 0.6.
+                # Looser than the original 2.0 threshold so two retellings of
+                # the same story (different sources, ≥60% overlap) get caught.
+                # See ADR-007.
+                if uniqueness < 4.0:
                     log.info(
                         "autopilot.skip_duplicate",
                         material_id=str(material.id),
@@ -1120,3 +1119,42 @@ def autopilot_expire_stale(self):
         session.commit()
         log.info("autopilot.expire_done", expired=len(stale))
         return {"status": "ok", "expired": len(stale)}
+
+
+@shared_task(
+    bind=True,
+    name="workers.autopilot_tasks.autopilot_archive_stale_drafts",
+    max_retries=1,
+    queue="ai_queue",
+)
+def autopilot_archive_stale_drafts(self):
+    """Archive draft adaptations whose source material is past the freshness window.
+
+    Runs hourly. Without this, the system accumulates draft adaptations forever,
+    bloating the rank_and_queue candidate pool and burning the lazy-adapt budget
+    on materials that will never publish anyway. See ADR-007.
+
+    Threshold: 48 hours after scrape time (twice the default queue cutoff of 24h,
+    giving slack for materials briefly under the threshold to make it through).
+    """
+    from app.models.channel_adaptation import ChannelAdaptation
+    from app.models.material import RawMaterial
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+
+    with get_sync_session() as session:
+        stale = session.execute(
+            select(ChannelAdaptation)
+            .join(RawMaterial, ChannelAdaptation.material_id == RawMaterial.id)
+            .where(
+                ChannelAdaptation.status == "draft",
+                RawMaterial.scraped_at < cutoff,
+            )
+        ).scalars().all()
+
+        for adapt in stale:
+            adapt.status = "archived"
+
+        session.commit()
+        log.info("autopilot.archive_stale_drafts.done", archived=len(stale))
+        return {"status": "ok", "archived": len(stale)}

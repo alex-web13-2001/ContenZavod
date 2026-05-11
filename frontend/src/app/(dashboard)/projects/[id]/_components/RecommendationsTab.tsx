@@ -53,6 +53,8 @@ interface RecommendationsTabProps {
   generatingCovers?: Record<string, boolean>;
   onRegenerate?: (scoreId: string) => void;
   regeneratingScores?: Record<string, boolean>;
+  /** Open the "send to autopilot" dialog for this material (handled by parent page). */
+  onSendToAutopilot?: (material: Material) => void;
 }
 
 export function RecommendationsTab({
@@ -65,6 +67,7 @@ export function RecommendationsTab({
   publishDialogScoreId, onOpenPublishDialog, onClosePublishDialog, onBatchPublish, publishingBatch,
   onGenerateCover, generatingCovers,
   onRegenerate, regeneratingScores,
+  onSendToAutopilot,
 }: RecommendationsTabProps) {
   const empty = EMPTY_STATES[pipelineStatus];
 
@@ -118,7 +121,9 @@ export function RecommendationsTab({
             if (pipelineStatus === "inbox") {
               return <div key={m.id} className={isExiting ? "cz-card-exiting" : ""}><InboxCard m={m}
                 onTake={(id) => onPipelineAction(id, "in_progress")}
-                onReject={(id) => onPipelineAction(id, "rejected")} /></div>;
+                onReject={(id) => onPipelineAction(id, "rejected")}
+                onAutopilot={onSendToAutopilot ? () => onSendToAutopilot(m) : undefined}
+              /></div>;
             }
 
             /* ── PUBLISHED ── */
