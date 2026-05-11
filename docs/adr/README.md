@@ -12,3 +12,4 @@
 | [004](./004-publish-pipeline.md) | Telegram Publish Pipeline | Accepted | 2026-04-17 |
 | [005](./005-channel-adaptations.md) | Channel Adaptations — новая модель адаптаций | Accepted | 2026-04-16 |
 | [006](./006-multi-format-autopilot.md) | Ratio-balanced мульти-форматный автопилот | Accepted | 2026-05-11 |
+| [007](./007-freshness-policy.md) | Жёсткая политика свежести материалов | Accepted | 2026-05-12 |

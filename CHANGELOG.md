@@ -8,6 +8,14 @@
 ## [Unreleased]
 
 ### Added
+- Жёсткая политика свежести в автопилоте (ADR-007): новый параметр `autopilot_config.max_material_age_hours` (default 24h) физически отсекает старые материалы от очереди — как в `rank_and_queue`, так и в lazy-adapt
+- Периодическая задача `autopilot_archive_stale_drafts` (каждый час в `:30`) — переводит черновики со старыми материалами в `status='archived'`
+- API: `POST /projects/{id}/autopilot/enqueue` — ручная постановка материала в очередь автопилота из таба «Рекомендации»
+- Celery task `adapt_and_enqueue_autopilot` — sync-адаптация (если черновика ещё нет) + создание `AutopilotQueueItem` со стратегией `express`
+- UI: кнопка «⚡ В автопилот» на карточке inbox-материала + модалка с выбором канала и формата (с пометкой «AI рекомендует» при совпадении с `suggested_format`)
+- UI: дата материала в карточке очереди автопилота — цвет зависит от свежести (<6h зелёный, <24h серый, иначе жёлтый), с тултипом «когда опубликован источником»
+- UI: инпут «Свежесть, часов» в настройках канала автопилота
+- ADR-007: переход от soft freshness floor к жёсткому hard cutoff
 - Мульти-форматный автопилот: формат `flash` (молния, 80–200 символов, без заголовка и обложки) рядом с `short_post` и `longread`
 - `suggested_format` в схеме классификатора — AI рекомендует формат при классификации (flash / short_post / longread)
 - Балансировка форматов в очереди автопилота через `format_ratios` (по умолчанию 40/40/20) с допуском перебора 1.5×
@@ -45,6 +53,8 @@
 - Статус-индикаторы: «✅ Опубликовано в Telegram» / «⏳ Одобрено — публикация в очереди»
 
 ### Changed
+- `autopilot_rank_and_queue` и lazy-adapt: добавлен JOIN с `raw_materials` и фильтр по `scraped_at >= now() - max_material_age_hours`
+- Порог семантического дедупа в `autopilot_rank_and_queue` ослаблен с `uniqueness < 2.0` (similarity > 0.8) на `< 4.0` (similarity > 0.6)
 - Промпт `short_post`: длина с 300–700 на **250–500** символов, ужесточена краткость
 - Промпт `longread`: длина с 1000–3000 на **1000–2500**, акцент на «аналитик, не блогер»
 - `adapt_material_for_channels`: использует AI-рекомендованный формат, если он в `channel.content_formats`; платформенный дефолт — fallback
@@ -57,5 +67,6 @@
 - `publish_tasks.py`: вынесена бизнес-логика в `PublishService` + `TelegramClient` (было 200 строк → 55)
 
 ### Fixed
+- Удалён soft `freshness floor = 5.0` в `_compute_freshness` — из-за него старые материалы с высоким rel/hype прорывались в очередь публикации (см. ADR-007). Теперь просроченные по TTL получают 0 и естественно отсекаются.
 - Исправлен дефолтный формат для Telegram: теперь генерируется short_post вместо longread
 - Исправлен ORM-атрибут `metadata` → `metadata_` в запросах категорий
