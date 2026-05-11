@@ -42,6 +42,8 @@ class AutopilotConfigUpdate(BaseModel):
     category_limits: dict | None = None
     ttl_hours: dict | None = None
     language_settings: dict | None = None  # Per-language overrides
+    format_ratios: dict | None = None  # {"flash": 0.4, "short_post": 0.4, "longread": 0.2}
+    longread_max_per_day: int | None = None
 
 
 class QueueActionRequest(BaseModel):
@@ -74,6 +76,7 @@ async def get_autopilot_config(
             "channel_id": str(ch.id),
             "channel_name": ch.name,
             "languages": ch.languages,
+            "content_formats": ch.content_formats or ["short_post"],
             "autopilot": {
                 "enabled": config.get("enabled", False),
                 "shadow_mode": config.get("shadow_mode", True),
@@ -86,6 +89,10 @@ async def get_autopilot_config(
                 "category_limits": config.get("category_limits", {}),
                 "ttl_hours": config.get("ttl_hours", {}),
                 "language_settings": config.get("language_settings", {}),
+                "format_ratios": config.get("format_ratios", {
+                    "flash": 0.40, "short_post": 0.40, "longread": 0.20,
+                }),
+                "longread_max_per_day": config.get("longread_max_per_day", 2),
             },
         })
 
@@ -287,11 +294,37 @@ async def get_autopilot_stats(
         )
     )).scalar() or 0
 
+    # Format counts today
+    format_counts: dict[str, int] = {}
+    fmt_rows = (await session.execute(
+        select(
+            ChannelAdaptation.content_format,
+            func.count(AutopilotQueueItem.id),
+        )
+        .join(
+            ChannelAdaptation,
+            AutopilotQueueItem.adaptation_id == ChannelAdaptation.id,
+        )
+        .where(
+            AutopilotQueueItem.project_id == pid,
+            AutopilotQueueItem.tenant_id == tid,
+            AutopilotQueueItem.created_at >= today_start,
+            AutopilotQueueItem.status.in_(
+                ["queued", "shadow", "approved", "publishing", "published"]
+            ),
+        )
+        .group_by(ChannelAdaptation.content_format)
+    )).all()
+    for fmt_name, cnt in fmt_rows:
+        if fmt_name:
+            format_counts[fmt_name] = cnt
+
     return {
         "today": status_counts,
         "published_today": status_counts.get("published", 0),
         "queued": status_counts.get("queued", 0) + status_counts.get("approved", 0),
         "shadow_pending": shadow_count,
+        "format_counts": format_counts,
         "next_scheduled": {
             "id": str(next_item.id),
             "scheduled_at": next_item.scheduled_at.isoformat(),

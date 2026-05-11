@@ -47,6 +47,17 @@ DEFAULT_TTL = {
 }
 
 
+# Default format ratio distribution for multi-format feeds
+DEFAULT_FORMAT_RATIOS = {
+    "flash": 0.40,
+    "short_post": 0.40,
+    "longread": 0.20,
+}
+
+# Telegram-compatible formats (the formats autopilot uses for TG channels)
+TELEGRAM_FORMATS = ["flash", "short_post", "longread"]
+
+
 def _get_autopilot_config(channel) -> dict:
     """Get autopilot config with defaults merged in."""
     defaults = {
@@ -61,6 +72,8 @@ def _get_autopilot_config(channel) -> dict:
         "ttl_hours": {},
         "shadow_mode": True,
         "language_settings": {},
+        "format_ratios": DEFAULT_FORMAT_RATIOS,
+        "longread_max_per_day": 2,
     }
     cfg = channel.autopilot_config or {}
     return {**defaults, **cfg}
@@ -308,13 +321,47 @@ def autopilot_rank_and_queue(self):
 
 
 
-            # Determine primary format for this channel type
-            _platform_primary = {
-                "telegram": "short_post",
-                "website": "longread",
-                "youtube": "video_script",
-            }
-            primary_format = _platform_primary.get(channel.channel_type, "short_post")
+            # Determine allowed formats for this channel type
+            if channel.channel_type == "telegram":
+                allowed_formats = [f for f in TELEGRAM_FORMATS
+                                   if f in (channel.content_formats or ["short_post"])]
+                if not allowed_formats:
+                    allowed_formats = ["short_post"]
+            else:
+                _platform_primary = {
+                    "website": "longread",
+                    "youtube": "video_script",
+                }
+                allowed_formats = [_platform_primary.get(channel.channel_type, "short_post")]
+
+            # Format balance: count today's items by format
+            format_ratios = config.get("format_ratios", DEFAULT_FORMAT_RATIOS)
+            longread_max = config.get("longread_max_per_day", 2)
+
+            format_counts_today: dict[str, int] = {}
+            fmt_rows = session.execute(
+                select(
+                    ChannelAdaptation.content_format,
+                    func.count(AutopilotQueueItem.id),
+                )
+                .join(
+                    ChannelAdaptation,
+                    AutopilotQueueItem.adaptation_id == ChannelAdaptation.id,
+                )
+                .where(
+                    AutopilotQueueItem.channel_id == channel.id,
+                    AutopilotQueueItem.created_at >= today_start,
+                    AutopilotQueueItem.status.in_(
+                        ["queued", "shadow", "approved", "publishing", "published"]
+                    ),
+                )
+                .group_by(ChannelAdaptation.content_format)
+            ).all()
+            for fmt_name, cnt in fmt_rows:
+                if fmt_name:
+                    format_counts_today[fmt_name] = cnt
+
+            total_today = sum(format_counts_today.values())
 
             # Find materials already in queue or published for this channel
             # This prevents the same article from being published twice
@@ -334,12 +381,12 @@ def autopilot_rank_and_queue(self):
             ).scalars().all()
             already_published_materials = set(already_queued_material_ids)
 
-            # Get ONLY primary-format draft adaptations for this channel
+            # Get draft adaptations for ALL allowed formats for this channel
             adaptations = session.execute(
                 select(ChannelAdaptation).where(
                     ChannelAdaptation.channel_id == channel.id,
                     ChannelAdaptation.status == "draft",
-                    ChannelAdaptation.content_format == primary_format,
+                    ChannelAdaptation.content_format.in_(allowed_formats),
                 )
             ).scalars().all()
 
@@ -551,19 +598,48 @@ def autopilot_rank_and_queue(self):
                     "strategy": "express" if is_express else "smart_queue",
                     "category": category,
                     "language": adapt_lang,
+                    "content_format": adapt.content_format,
                 })
 
             # Sort by final score descending
             scored_items.sort(key=lambda x: x["final"], reverse=True)
 
-            # Take items respecting per-language limits
+            # Take items respecting per-language limits AND format balance
+            queued_formats: dict[str, int] = dict(format_counts_today)  # copy
             for item in scored_items:
                 lang = item["language"]
                 lang_rem = remaining_by_lang.get(lang, 0)
                 lang_q = queued_by_lang.get(lang, 0)
                 if lang_q >= lang_rem:
                     continue  # This language is full
+
+                fmt = item["content_format"]
                 adapt = item["adaptation"]
+
+                # Format balance check: skip if this format is over its ratio
+                if total_today > 0 and fmt in format_ratios:
+                    current_ratio = queued_formats.get(fmt, 0) / max(total_today, 1)
+                    target_ratio = format_ratios.get(fmt, 0.5)
+                    # Allow 1.5x overshoot before blocking
+                    if current_ratio > target_ratio * 1.5 and item["strategy"] != "express":
+                        log.debug(
+                            "autopilot.skip_format_balance",
+                            format=fmt,
+                            current=current_ratio,
+                            target=target_ratio,
+                        )
+                        continue
+
+                # Longread daily limit check
+                if fmt == "longread":
+                    lr_today = queued_formats.get("longread", 0)
+                    if lr_today >= longread_max and item["strategy"] != "express":
+                        log.debug(
+                            "autopilot.skip_longread_limit",
+                            count=lr_today,
+                            limit=longread_max,
+                        )
+                        continue
 
                 # Determine status based on shadow mode
                 initial_status = "shadow" if shadow else "queued"
@@ -593,13 +669,15 @@ def autopilot_rank_and_queue(self):
                 )
                 session.add(queue_item)
                 total_queued += 1
+                total_today += 1
                 queued_by_lang[lang] = queued_by_lang.get(lang, 0) + 1
+                queued_formats[fmt] = queued_formats.get(fmt, 0) + 1
 
-                # Always dispatch cover generation for queued items
-                # cover_policy only controls whether PUBLISHING requires a cover
-                # We always generate covers so users can preview them
+                # Cover generation: flash NEVER gets covers, others follow policy
                 needs_cover = True
-                if config.get("cover_policy") == "never":
+                if fmt == "flash":
+                    needs_cover = False
+                elif config.get("cover_policy") == "never":
                     needs_cover = False
 
                 if needs_cover and not adapt.cover_status:
@@ -621,6 +699,7 @@ def autopilot_rank_and_queue(self):
                     adaptation_id=str(adapt.id),
                     channel=channel.name,
                     language=adapt.language,
+                    format=fmt,
                     strategy=item["strategy"],
                     final_score=item["final"],
                     status=initial_status,

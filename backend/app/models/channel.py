@@ -43,7 +43,7 @@ class Channel(Base, TenantMixin, TimestampMixin):
     # Content formats: which article types this channel publishes (JSON array)
     content_formats: Mapped[list] = mapped_column(
         JSONB, server_default='["short_post"]', nullable=False
-    )  # ["short_post", "longread", "video_script", "digest"]
+    )  # ["flash", "short_post", "longread", "video_script", "digest"]
 
     # Tone of voice: writing style instructions for AI
     tone_of_voice: Mapped[str] = mapped_column(
@@ -86,7 +86,9 @@ class Channel(Base, TenantMixin, TimestampMixin):
     #   "schedule_slots": ["morning", "lunch", "evening"],
     #   "category_limits": {"politics": 3, "sport": 2},
     #   "ttl_hours": {"default": 24, "breaking": 4, "sport": 8},
-    #   "shadow_mode": true
+    #   "shadow_mode": true,
+    #   "format_ratios": {"flash": 0.40, "short_post": 0.40, "longread": 0.20},
+    #   "longread_max_per_day": 2
     # }
     autopilot_config: Mapped[dict] = mapped_column(
         JSONB, server_default="{}", nullable=False

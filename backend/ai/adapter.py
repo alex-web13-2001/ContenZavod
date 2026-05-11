@@ -21,10 +21,32 @@ GEMINI_URL = "https://api.kie.ai/gemini-3.1-pro/v1/chat/completions"
 CLAUDE_URL = "https://api.kie.ai/claude/v1/messages"
 
 FORMAT_INSTRUCTIONS = {
-    "short_post": "Формат: Короткий пост для Telegram (300–700 символов). Один ключевой факт, без воды. Разбивай текст на абзацы по 2-3 предложения. Между абзацами ОБЯЗАТЕЛЬНО пустая строка (\\n\\n). Заключительный вопрос/вывод выделяется жирным и отделяется пустой строкой.",
-    "longread": "Формат: Лонгрид (1000–3000 символов). Развёрнутая статья с вводкой, основной частью и выводом. 3-5 абзацев, между абзацами пустая строка.",
-    "video_script": "Формат: Видеоскрипт (500–1500 символов). Сценарий для озвучки: хук в первые 5 секунд, основная часть, call-to-action.",
-    "digest": "Формат: Дайджест-пункт (100–250 символов). Ультра-краткий саммари новости в одну фразу для новостного дайджеста.",
+    "flash": (
+        "Формат: Молния/Flash (80–200 символов). Одно-два предложения с ключевым фактом. "
+        "Начинай с эмодзи ⚡. Весь пост — это ТОЛЬКО голый факт. "
+        "НЕ добавляй заголовок, комментарии, выводы, вопросы, call-to-action. "
+        "НЕ используй жирный текст. Просто факт."
+    ),
+    "short_post": (
+        "Формат: Стандартный пост для Telegram (250–500 символов). Один ключевой факт с кратким контекстом. "
+        "2-3 абзаца по 1-2 предложения. Между абзацами ОБЯЗАТЕЛЬНО пустая строка (\\n\\n). "
+        "Заключительный вопрос/вывод выделяется жирным и отделяется пустой строкой. "
+        "Пиши КРАТКО. Не лей воду. Каждое предложение несёт новую информацию."
+    ),
+    "longread": (
+        "Формат: Аналитика (1000–2500 символов). Развёрнутая статья НА ФАКТАХ: "
+        "вводка с главным фактом, 2-3 аргумента с конкретными данными/цифрами, вывод. "
+        "4-6 абзацев, между абзацами пустая строка. "
+        "Пиши как аналитик, не как блогер. Только факты и обоснованные выводы."
+    ),
+    "video_script": (
+        "Формат: Видеоскрипт (500–1500 символов). Сценарий для озвучки: "
+        "хук в первые 5 секунд, основная часть, call-to-action."
+    ),
+    "digest": (
+        "Формат: Дайджест-пункт (100–250 символов). Ультра-краткий саммари "
+        "новости в одну фразу для новостного дайджеста."
+    ),
 }
 
 SYSTEM_PROMPT = """You are a professional content writer and editor.
@@ -35,6 +57,7 @@ Rules:
 2. Follow the tone of voice instructions precisely
 3. Follow the content format instructions precisely
 4. The headline should be catchy and attention-grabbing, with an emoji at the start
+   - EXCEPTION: For "flash" format, leave headline EMPTY (empty string ""). The entire post is just the body.
 5. Write the body as CLEAN PLAIN TEXT:
    - DO NOT use markdown links like [text](url) — never embed URLs in the body text
    - DO NOT use bold **markers** inside sentences for emphasis on numbers or words
@@ -42,6 +65,7 @@ Rules:
    - Use emoji sparingly — only at the start of the first paragraph for accent
    - CRITICAL: Break text into paragraphs of 2-3 sentences each, separated by BLANK LINES (\\n\\n)
    - NEVER write the entire post as one continuous block of text
+   - EXCEPTION: For "flash" format, body is 1-2 sentences MAX, no paragraphs, no bold, no concluding question
 6. DO NOT invent facts — use only information from the source material
 7. DO NOT include meta-text like "Вот пост:", "Заголовок:", structural markers like "(Хук)", "(Основная часть)" etc.
 8. FORMATTING RULES ARE MANDATORY — if formatting rules are provided, you MUST follow them exactly.

@@ -81,12 +81,22 @@ CLASSIFY_TOOL = {
                     "items": {"type": "string"},
                     "description": "10-15 key factual entities from this article for deduplication. Include: specific person names, organization names, place names, exact numbers/amounts, specific dates, law/bill names, event names. Must be normalized (e.g. 'European Union' not 'EU', 'Nikos Christodoulides' not 'president'). Lowercase.",
                 },
+                "suggested_format": {
+                    "type": "string",
+                    "enum": ["flash", "short_post", "longread"],
+                    "description": (
+                        "Recommended content format for publishing this article. "
+                        "flash: Single fact, price change, appointment, award — anything expressed in 1-2 sentences. No analysis needed. "
+                        "short_post: Regular news needing 2-3 paragraphs of context to explain properly. Most articles fall here. "
+                        "longread: Complex topic requiring analysis, multiple data points, expert opinions — rare, only for truly substantial stories."
+                    ),
+                },
             },
             "required": [
                 "category", "subcategory", "tags",
                 "summary_ru", "summary_en",
                 "relevance_score", "sentiment", "is_breaking",
-                "key_entities",
+                "key_entities", "suggested_format",
             ],
         },
     },

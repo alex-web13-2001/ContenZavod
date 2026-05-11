@@ -62,15 +62,23 @@ class PublishService:
         channel = self._load_channel(job)
 
         bot_token, chat_id = self._validate_config(channel, language=adaptation.language)
-        message_html = self._format_message(adaptation, bot_token)
+        content_format = adaptation.content_format or "short_post"
+        message_html = self._format_message(adaptation, bot_token, content_format)
 
-        # Check for cover image: adaptation-level first, then material fallback
-        cover_data = self._get_cover_image(adaptation)
+        # Flash posts NEVER have covers
+        if content_format == "flash":
+            cover_data = None
+        else:
+            # Check for cover image: adaptation-level first, then material fallback
+            cover_data = self._get_cover_image(adaptation)
 
         if cover_data:
             result = self._send_with_photo(bot_token, chat_id, message_html, cover_data)
         else:
-            result = self._send(bot_token, chat_id, message_html)
+            result = self._send(
+                bot_token, chat_id, message_html,
+                disable_web_page_preview=(content_format == "flash"),
+            )
 
         self._mark_published(job, adaptation, result, chat_id)
         return result
@@ -165,13 +173,15 @@ class PublishService:
         return bot_token, chat_id
 
     def _format_message(
-        self, adaptation: ChannelAdaptation, bot_token: str
+        self, adaptation: ChannelAdaptation, bot_token: str,
+        content_format: str = "short_post",
     ) -> str:
         """Format the adaptation into a Telegram-ready HTML message.
 
         Args:
             adaptation: The content adaptation to format.
             bot_token: Bot token for TelegramClient initialization.
+            content_format: Content format (flash, short_post, longread).
 
         Returns:
             HTML-formatted message string.
@@ -180,6 +190,7 @@ class PublishService:
         return client.format_post(
             headline=adaptation.headline or "",
             body=adaptation.body or "",
+            content_format=content_format,
         )
 
     def _get_cover_image(self, adaptation) -> bytes | None:
@@ -272,13 +283,17 @@ class PublishService:
 
         raise PublishError(result.error)
 
-    def _send(self, bot_token: str, chat_id: str, html_text: str) -> dict:
+    def _send(
+        self, bot_token: str, chat_id: str, html_text: str,
+        disable_web_page_preview: bool = False,
+    ) -> dict:
         """Send the message via Telegram.
 
         Args:
             bot_token: Telegram bot token.
             chat_id: Target chat/channel ID.
             html_text: Formatted message.
+            disable_web_page_preview: Disable link previews (used for flash).
 
         Returns:
             Dict with message_id and raw_response.
@@ -288,7 +303,10 @@ class PublishService:
             PublishError: On permanent failures.
         """
         client = TelegramClient(bot_token)
-        result = client.send_message(chat_id, html_text)
+        result = client.send_message(
+            chat_id, html_text,
+            disable_web_page_preview=disable_web_page_preview,
+        )
 
         if result.success:
             return {

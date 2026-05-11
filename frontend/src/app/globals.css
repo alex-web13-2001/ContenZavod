@@ -1914,3 +1914,50 @@ body {
   background: hsl(var(--cz-error) / 0.15);
   border-color: hsl(var(--cz-error) / 0.3);
 }
+
+/* ═══ Format Mix Settings ═══ */
+
+.ap-format-mix-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.ap-format-ratio-item {
+  background: hsl(var(--cz-bg-elevated) / 0.6);
+  border: 1px solid hsl(var(--cz-border-subtle));
+  border-radius: 10px;
+  padding: 10px 12px;
+  transition: border-color 0.2s;
+}
+
+.ap-format-ratio-item:hover {
+  border-color: hsl(var(--cz-border));
+}
+
+.ap-format-ratio-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+/* Queue format badge */
+.ap-queue-format-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 8px;
+  border-radius: var(--cz-radius-full);
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 640px) {
+  .ap-format-mix-grid {
+    grid-template-columns: 1fr;
+  }
+}

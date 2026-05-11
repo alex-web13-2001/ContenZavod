@@ -30,6 +30,7 @@ interface AutopilotChannelConfig {
   channel_id: string;
   channel_name: string;
   languages: string[];
+  content_formats: string[];
   autopilot: {
     enabled: boolean;
     shadow_mode: boolean;
@@ -46,6 +47,8 @@ interface AutopilotChannelConfig {
       min_interval_minutes?: number;
       min_score_threshold?: number;
     }>;
+    format_ratios: Record<string, number>;
+    longread_max_per_day: number;
   };
 }
 
@@ -74,6 +77,7 @@ interface AutopilotStats {
   published_today: number;
   queued: number;
   shadow_pending: number;
+  format_counts: Record<string, number>;
   next_scheduled: {
     id: string;
     scheduled_at: string;
@@ -97,6 +101,12 @@ const COVER_LABELS: Record<string, string> = {
   short_post_optional: "Short без обложки",
   always_required: "Всегда с обложкой",
   never: "Без обложек",
+};
+
+const FORMAT_LABELS: Record<string, { label: string; icon: string; color: string }> = {
+  flash: { label: "Молния", icon: "⚡", color: "var(--cz-warning)" },
+  short_post: { label: "Стандарт", icon: "📝", color: "var(--cz-info)" },
+  longread: { label: "Лонгрид", icon: "📊", color: "var(--cz-success)" },
 };
 
 const STRATEGY_LABELS: Record<string, { label: string; icon: React.ReactNode }> = {
@@ -258,6 +268,22 @@ export function AutopilotTab({ projectId }: Props) {
               <div className="ap-stat">
                 <div className="ap-stat__value ap-stat__value--accent">{stats.shadow_pending}</div>
                 <div className="ap-stat__label">Ожидают одобрения</div>
+              </div>
+              <div className="ap-stat-divider" />
+              {/* Format mix mini-stats */}
+              <div className="ap-stat">
+                <div className="ap-stat__value" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  {Object.entries(stats.format_counts || {}).map(([fmt, cnt]) => {
+                    const info = FORMAT_LABELS[fmt];
+                    return info ? (
+                      <span key={fmt} title={info.label} style={{ fontSize: 12, color: `hsl(${info.color})` }}>
+                        {info.icon}{cnt}
+                      </span>
+                    ) : null;
+                  })}
+                  {Object.keys(stats.format_counts || {}).length === 0 && "—"}
+                </div>
+                <div className="ap-stat__label">Формат-микс</div>
               </div>
               <div className="ap-stat-divider" />
               <div className="ap-stat">
@@ -591,6 +617,53 @@ function ChannelConfigCard({
             </div>
           </div>
 
+          {/* Row 5: Format Mix */}
+          <div className="ap-setting-section">
+            <label className="cz-form-label">Формат-микс</label>
+            <div className="ap-format-mix-grid">
+              {Object.entries(FORMAT_LABELS).map(([fmt, { label, icon, color }]) => {
+                const ratio = (localConfig.format_ratios || {})[fmt] ?? 0;
+                const pct = Math.round(ratio * 100);
+                return (
+                  <div key={fmt} className="ap-format-ratio-item">
+                    <div className="ap-format-ratio-header">
+                      <span style={{ color: `hsl(${color})` }}>{icon}</span>
+                      <span className="cz-text-xs cz-font-medium">{label}</span>
+                      <span className="cz-text-xs cz-text-muted">{pct}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={5}
+                      value={pct}
+                      className="ap-slider"
+                      onChange={(e) => {
+                        const newPct = Number(e.target.value) / 100;
+                        const updatedRatios = { ...(localConfig.format_ratios || {}) };
+                        updatedRatios[fmt] = newPct;
+                        setLocalConfig({ ...localConfig, format_ratios: updatedRatios });
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="ap-settings-grid" style={{ marginTop: 8 }}>
+              <div className="ap-setting">
+                <label className="cz-form-label">Лонгридов/день макс</label>
+                <input
+                  type="number"
+                  className="cz-input focus-ring ap-input--compact"
+                  value={localConfig.longread_max_per_day}
+                  min={0}
+                  max={10}
+                  onChange={(e) => setLocalConfig({ ...localConfig, longread_max_per_day: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+          </div>
+
           {/* Save button */}
           {hasChanges && (
             <div className="ap-save-row">
@@ -674,7 +747,7 @@ function QueueItemCard({
         {/* Content */}
         <div className="ap-queue-content">
           <div className="ap-queue-headline">
-            {item.headline || "Без заголовка"}
+            {item.content_format === "flash" ? (item.body_preview || "⚡ Flash") : (item.headline || "Без заголовка")}
           </div>
           <div className="ap-queue-meta">
             <span className="ap-queue-meta-item">
@@ -683,10 +756,20 @@ function QueueItemCard({
             <span className="ap-queue-meta-item" style={{ textTransform: "uppercase" }}>
               {item.language}
             </span>
-            <span className="ap-queue-meta-item">
-              {item.content_format === "short_post" ? "Пост" : "Лонгрид"}
-            </span>
-            {coverIcon() && (
+            {(() => {
+              const fmtInfo = FORMAT_LABELS[item.content_format];
+              return fmtInfo ? (
+                <span
+                  className="ap-queue-format-badge"
+                  style={{ color: `hsl(${fmtInfo.color})`, borderColor: `hsla(${fmtInfo.color}, 0.3)` }}
+                >
+                  {fmtInfo.icon} {fmtInfo.label}
+                </span>
+              ) : (
+                <span className="ap-queue-meta-item">{item.content_format}</span>
+              );
+            })()}
+            {item.content_format !== "flash" && coverIcon() && (
               <span className="ap-queue-meta-item">
                 {coverIcon()} Обложка
               </span>

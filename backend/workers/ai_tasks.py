@@ -346,13 +346,24 @@ def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_
             "website": "longread",
             "youtube": "video_script",
         }
+
+        # Use AI-suggested format when available (multi-format support)
+        suggested_format = ai_data.get("suggested_format")
+
         for channel in channels:
-            # Pick the best primary format for this platform
-            default = _platform_defaults.get(channel.channel_type, "short_post")
-            if default in (channel.content_formats or []):
-                primary_format = default
+            # Determine content format for this channel:
+            # 1. Use AI-suggested format if it's in the channel's allowed formats
+            # 2. Fall back to platform default
+            # 3. Fall back to first allowed format
+            channel_formats = channel.content_formats or ["short_post"]
+            if suggested_format and suggested_format in channel_formats:
+                primary_format = suggested_format
             else:
-                primary_format = channel.content_formats[0] if channel.content_formats else "short_post"
+                default = _platform_defaults.get(channel.channel_type, "short_post")
+                if default in channel_formats:
+                    primary_format = default
+                else:
+                    primary_format = channel_formats[0]
             for language in channel.languages:
                 # Check if adaptation already exists (idempotency)
                 existing = session.execute(

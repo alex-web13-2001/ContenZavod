@@ -85,17 +85,22 @@ class TelegramClient:
         self.bot_token = bot_token
         self.timeout = timeout
 
-    def format_post(self, headline: str, body: str) -> str:
+    def format_post(self, headline: str, body: str, content_format: str = "short_post") -> str:
         """Format headline + body into a Telegram-ready HTML message.
 
         Args:
             headline: Post headline (will be bolded).
             body: Post body in markdown.
+            content_format: Content format (flash, short_post, longread).
 
         Returns:
             HTML string within Telegram's 4096-char limit.
         """
-        raw_text = f"**{headline}**\n\n{body}" if headline else body
+        if content_format == "flash":
+            # Flash: no headline, just body text as-is
+            raw_text = body
+        else:
+            raw_text = f"**{headline}**\n\n{body}" if headline else body
         html_text = markdown_to_telegram_html(raw_text)
 
         if len(html_text) > MAX_MESSAGE_LENGTH:
@@ -103,12 +108,18 @@ class TelegramClient:
 
         return html_text
 
-    def send_message(self, chat_id: str, text: str) -> TelegramSendResult:
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        disable_web_page_preview: bool = False,
+    ) -> TelegramSendResult:
         """Send a text message to a Telegram chat/channel.
 
         Args:
             chat_id: Target chat ID (@channel_name or numeric ID).
             text: HTML-formatted message text.
+            disable_web_page_preview: If True, disable link previews.
 
         Returns:
             TelegramSendResult with success status and message_id or error.
@@ -129,7 +140,7 @@ class TelegramClient:
                         "chat_id": chat_id,
                         "text": text,
                         "parse_mode": "HTML",
-                        "disable_web_page_preview": False,
+                        "disable_web_page_preview": disable_web_page_preview,
                     },
                 )
 
