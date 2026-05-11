@@ -11,3 +11,4 @@
 | [003](./003-pluggable-ai.md) | Pluggable AI Provider System | Accepted | 2026-04-15 |
 | [004](./004-publish-pipeline.md) | Telegram Publish Pipeline | Accepted | 2026-04-17 |
 | [005](./005-channel-adaptations.md) | Channel Adaptations — новая модель адаптаций | Accepted | 2026-04-16 |
+| [006](./006-multi-format-autopilot.md) | Ratio-balanced мульти-форматный автопилот | Accepted | 2026-05-11 |

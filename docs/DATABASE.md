@@ -186,7 +186,8 @@ AI-скоринг материалов для каналов (legacy, замен
 | project_id | UUID FK → projects | nullable |
 | name | VARCHAR(255) | |
 | channel_type | VARCHAR(50) | telegram / youtube / website |
-| content_formats | JSONB | ["short_post", "longread", ...] |
+| content_formats | JSONB | ["flash", "short_post", "longread", "video_script", "digest"] |
+| autopilot_config | JSONB | См. ниже (правила автопилота на уровне канала) |
 | tone_of_voice | TEXT | Инструкции по тону |
 | languages | JSONB | ["ru", "en"] |
 | config | JSONB | bot_token, chat_id (Telegram) |
@@ -194,6 +195,27 @@ AI-скоринг материалов для каналов (legacy, замен
 | editorial_rules | TEXT | Редакционные правила |
 | is_active | BOOLEAN | |
 | created_at | TIMESTAMPTZ | |
+
+**`autopilot_config` JSONB structure (per-channel rules):**
+```json
+{
+  "enabled": false,
+  "shadow_mode": true,
+  "strategies": ["smart_queue", "express"],
+  "max_posts_per_day": 10,
+  "min_interval_minutes": 45,
+  "min_score_threshold": 7.0,
+  "cover_policy": "short_post_optional",
+  "schedule_slots": ["morning", "lunch", "evening", "night"],
+  "category_limits": {"politics": 3, "sport": 2},
+  "ttl_hours": {"default": 24, "breaking": 4, "sport": 8},
+  "language_settings": {
+    "ru": {"max_posts_per_day": 12, "min_interval_minutes": 30}
+  },
+  "format_ratios": {"flash": 0.40, "short_post": 0.40, "longread": 0.20},
+  "longread_max_per_day": 2
+}
+```
 
 ### channel_adaptations
 Адаптации контента под конкретный канал и формат.
@@ -204,7 +226,7 @@ AI-скоринг материалов для каналов (legacy, замен
 | tenant_id | UUID FK | |
 | channel_id | UUID FK → channels | |
 | material_id | UUID FK → raw_materials | |
-| content_format | VARCHAR(50) | short_post / longread / video_script / digest |
+| content_format | VARCHAR(50) | flash / short_post / longread / video_script / digest |
 | headline | VARCHAR(500) | Заголовок адаптации |
 | body | TEXT | Основной текст |
 | metadata | JSONB | hashtags, hooks, структура |

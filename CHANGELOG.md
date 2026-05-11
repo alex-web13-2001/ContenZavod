@@ -8,6 +8,14 @@
 ## [Unreleased]
 
 ### Added
+- Мульти-форматный автопилот: формат `flash` (молния, 80–200 символов, без заголовка и обложки) рядом с `short_post` и `longread`
+- `suggested_format` в схеме классификатора — AI рекомендует формат при классификации (flash / short_post / longread)
+- Балансировка форматов в очереди автопилота через `format_ratios` (по умолчанию 40/40/20) с допуском перебора 1.5×
+- Жёсткий дневной лимит лонгридов (`longread_max_per_day`, default 2)
+- API: `format_ratios`, `longread_max_per_day` в `GET/PATCH /autopilot/config`; `format_counts` в `GET /autopilot/stats`
+- UI: слайдеры формат-микса в настройках канала, бейджи ⚡📝📊 в карточках очереди, мини-статистика формат-микса в шапке автопилота
+- Data-migration script `backend/scripts/add_flash_format.py` — добавляет `flash` в `content_formats` существующих Telegram-каналов
+- ADR-006: переход от primary-format-only к ratio-balanced multi-format очереди
 - Инициализация проекта: CLAUDE.md, структура документации, CHANGELOG
 - Документация: ARCHITECTURE.md, DATABASE.md, AI_PROVIDERS.md, 3 ADR
 - Backend foundation: FastAPI app factory, Pydantic Settings, async DB engine
@@ -37,6 +45,13 @@
 - Статус-индикаторы: «✅ Опубликовано в Telegram» / «⏳ Одобрено — публикация в очереди»
 
 ### Changed
+- Промпт `short_post`: длина с 300–700 на **250–500** символов, ужесточена краткость
+- Промпт `longread`: длина с 1000–3000 на **1000–2500**, акцент на «аналитик, не блогер»
+- `adapt_material_for_channels`: использует AI-рекомендованный формат, если он в `channel.content_formats`; платформенный дефолт — fallback
+- `autopilot_rank_and_queue`: отбирает черновики ВСЕХ разрешённых форматов канала, а не только primary
+- `TelegramClient.format_post`: `flash` отправляется без заголовка
+- `TelegramClient.send_message`: добавлен `disable_web_page_preview` (включается для flash)
+- `PublishService`: flash пропускает загрузку обложки и отключает превью ссылок
 - `content_formats` канала Telegram: порядок изменён на `[short_post, longread, ...]` (был longread первым)
 - `PublishJob.content_id` FK: перенаправлен с `adapted_contents` на `channel_adaptations`
 - `publish_tasks.py`: вынесена бизнес-логика в `PublishService` + `TelegramClient` (было 200 строк → 55)
