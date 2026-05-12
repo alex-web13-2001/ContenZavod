@@ -603,6 +603,13 @@ def autopilot_rank_and_queue(self):
             # Sort by final score descending
             scored_items.sort(key=lambda x: x["final"], reverse=True)
 
+            # Format balance only makes sense when there's actual variety in
+            # the candidate pool. If we only have drafts in one format,
+            # block-balancing starves the queue entirely (the format hits 100%
+            # of the day, exceeds target × 1.5, and every item gets skipped).
+            available_formats = {it["content_format"] for it in scored_items}
+            balance_active = len(available_formats) > 1
+
             # Take items respecting per-language limits AND format balance
             queued_formats: dict[str, int] = dict(format_counts_today)  # copy
             for item in scored_items:
@@ -615,8 +622,9 @@ def autopilot_rank_and_queue(self):
                 fmt = item["content_format"]
                 adapt = item["adaptation"]
 
-                # Format balance check: skip if this format is over its ratio
-                if total_today > 0 and fmt in format_ratios:
+                # Format balance check: skip if this format is over its ratio.
+                # Skipped when the candidate pool is mono-format (see above).
+                if balance_active and total_today > 0 and fmt in format_ratios:
                     current_ratio = queued_formats.get(fmt, 0) / max(total_today, 1)
                     target_ratio = format_ratios.get(fmt, 0.5)
                     # Allow 1.5x overshoot before blocking
@@ -771,6 +779,27 @@ def autopilot_publish_next(self):
                 item.status = "skipped"
                 item.skip_reason = "adaptation_not_found"
                 continue
+
+            # ADR-007: re-verify material freshness at publish time.
+            # rank_and_queue already filters, but an item may sit in the queue
+            # for hours waiting for a slot — recheck so we never publish stale.
+            from app.models.material import RawMaterial as _RM
+            mat = session.get(_RM, adaptation.material_id)
+            if mat:
+                max_age = int(config.get("max_material_age_hours", 24))
+                mat_scraped = mat.scraped_at
+                if mat_scraped.tzinfo is None:
+                    mat_scraped = mat_scraped.replace(tzinfo=timezone.utc)
+                if mat_scraped < now - timedelta(hours=max_age):
+                    item.status = "expired"
+                    item.skip_reason = f"stale_at_publish_time_{int((now - mat_scraped).total_seconds() / 3600)}h"
+                    log.info(
+                        "autopilot.skip_stale_at_publish",
+                        adaptation_id=str(item.adaptation_id),
+                        material_age_hours=int((now - mat_scraped).total_seconds() / 3600),
+                        max_age=max_age,
+                    )
+                    continue
 
             adapt_lang = adaptation.language or "ru"
             lang_cfg = _get_language_config(config, adapt_lang)
@@ -1097,14 +1126,21 @@ def autopilot_retry_covers(self):
 def autopilot_expire_stale(self):
     """Expire stale items from the autopilot queue.
 
-    Items that have been queued/shadow for too long are marked as expired.
+    Two reasons an item gets expired:
+      1. Queue-level TTL: item has been queued/shadow for >48h
+      2. Material-level TTL (ADR-007): source material is >48h old
+         — happens when an item was queued just before the cutoff and
+         then waited too long for a slot, or when worker restarts left
+         items stuck. This is a safety net behind publish_next's check.
     """
     from app.models.autopilot_queue import AutopilotQueueItem
+    from app.models.channel_adaptation import ChannelAdaptation
+    from app.models.material import RawMaterial
 
-    # Items older than 48 hours that haven't been published
     cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
 
     with get_sync_session() as session:
+        # 1. Queue-level expiry: too long since item was created
         stale = session.execute(
             select(AutopilotQueueItem).where(
                 AutopilotQueueItem.status.in_(["queued", "shadow"]),
@@ -1115,6 +1151,23 @@ def autopilot_expire_stale(self):
         for item in stale:
             item.status = "expired"
             item.skip_reason = "ttl_exceeded_48h"
+
+        # 2. Material-level expiry: catch items whose source is now too old.
+        # Same 48h threshold — twice the default max_material_age_hours of 24h,
+        # leaving slack for items that briefly slip under the limit.
+        stale_by_material = session.execute(
+            select(AutopilotQueueItem)
+            .join(ChannelAdaptation, AutopilotQueueItem.adaptation_id == ChannelAdaptation.id)
+            .join(RawMaterial, ChannelAdaptation.material_id == RawMaterial.id)
+            .where(
+                AutopilotQueueItem.status.in_(["queued", "shadow", "approved", "publishing"]),
+                RawMaterial.scraped_at < cutoff,
+            )
+        ).scalars().all()
+
+        for item in stale_by_material:
+            item.status = "expired"
+            item.skip_reason = "material_too_old_48h"
 
         session.commit()
         log.info("autopilot.expire_done", expired=len(stale))
