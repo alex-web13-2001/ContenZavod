@@ -8,6 +8,7 @@
 ## [Unreleased]
 
 ### Added
+- Поддержка многоязычных источников: классификатор теперь читает статьи на любом языке (EN/EL и др.), translates `summary_ru/summary_en` напрямую с источника. Tags и `key_entities` всегда нормализуются в латиницу для cross-lingual дедупа.
 - Жёсткая политика свежести в автопилоте (ADR-007): новый параметр `autopilot_config.max_material_age_hours` (default 24h) физически отсекает старые материалы от очереди — как в `rank_and_queue`, так и в lazy-adapt
 - Периодическая задача `autopilot_archive_stale_drafts` (каждый час в `:30`) — переводит черновики со старыми материалами в `status='archived'`
 - API: `POST /projects/{id}/autopilot/enqueue` — ручная постановка материала в очередь автопилота из таба «Рекомендации»
