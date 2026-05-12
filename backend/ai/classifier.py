@@ -85,10 +85,10 @@ CLASSIFY_TOOL = {
                     "type": "string",
                     "enum": ["flash", "short_post", "longread"],
                     "description": (
-                        "Recommended content format for publishing this article. "
-                        "flash: Single fact, price change, appointment, award — anything expressed in 1-2 sentences. No analysis needed. "
-                        "short_post: Regular news needing 2-3 paragraphs of context to explain properly. Most articles fall here. "
-                        "longread: Complex topic requiring analysis, multiple data points, expert opinions — rare, only for truly substantial stories."
+                        "Recommended content format for publishing this article. Default to flash unless the article truly demands more.\n"
+                        "flash (DEFAULT, use liberally — target ~40-50% of articles): A factual news item whose essence fits in 1-3 sentences: incidents, prices, appointments, awards, accidents, breakdowns, weather, announcements, statistics, single quotes, court rulings, sports results, brief Q&A. If you can summarise the core fact in two sentences, this is flash.\n"
+                        "short_post (target ~40-50%): Choose this only when the story has 2-3 distinct connected facts that need a short paragraph of context — not just a single development with quoted reactions. Reactions, background, or 'why this matters' need to add genuine information beyond restating the lead.\n"
+                        "longread (rare, target ~5-10%): Reserved for substantial analysis, investigations, multi-source explainers, or complex topics with 4+ data points, expert opinions, and a clear narrative arc. If in doubt, prefer short_post over longread."
                     ),
                 },
             },
