@@ -58,6 +58,16 @@ class PublishService:
             PublishRetryError: On transient failures that should be retried.
         """
         job = self._load_job(publish_job_id)
+
+        # Idempotent short-circuit: job already marked as published in a prior run.
+        # Return the recorded result without touching Telegram again.
+        if job.status == "published":
+            return {
+                "message_id": job.platform_post_id,
+                "raw_response": job.platform_response or {},
+                "already_published": True,
+            }
+
         adaptation = self._load_adaptation(job)
         channel = self._load_channel(job)
 
@@ -84,10 +94,36 @@ class PublishService:
         return result
 
     def _load_job(self, job_id: str) -> PublishJob:
-        """Load and validate the publish job."""
+        """Load the publish job and acquire it idempotently.
+
+        Three terminal-ish states protect against duplicate Telegram sends
+        when Celery re-dispatches a task (task_acks_late + worker crash
+        between send_message and commit):
+
+          - status='published' → job is already done; return it for caller
+            to treat as success. Caller's _mark_published is a no-op here.
+          - status='publishing' → another worker is processing it, OR a
+            previous attempt crashed mid-flight (and may already have sent
+            the message to Telegram). Refuse to proceed — better to leave a
+            stale row than to publish twice.
+          - status='failed' / 'cancelled' → permanently dead, refuse.
+
+        Only 'scheduled' (the normal entry point) acquires the lock.
+        """
         job = self.session.get(PublishJob, uuid.UUID(job_id))
         if not job:
             raise PublishError(f"PublishJob {job_id} not found")
+
+        if job.status == "published":
+            log.info("publish.already_done", job_id=job_id)
+            return job
+
+        if job.status in ("publishing", "failed", "cancelled"):
+            # Refuse without raising PublishRetryError — we never want Celery
+            # to retry this; that's how duplicates happen.
+            raise PublishError(
+                f"PublishJob {job_id} not acquirable: status={job.status}"
+            )
 
         job.status = "publishing"
         self.session.commit()
