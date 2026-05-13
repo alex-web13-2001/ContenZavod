@@ -73,7 +73,14 @@ class PublishService:
 
         bot_token, chat_id = self._validate_config(channel, language=adaptation.language)
         content_format = adaptation.content_format or "short_post"
-        message_html = self._format_message(adaptation, bot_token, content_format)
+
+        # Build attribution if the cover came from the source feed.
+        # Source images get a "📷 {source_name}" link to the original article.
+        attribution = self._build_attribution(adaptation)
+
+        message_html = self._format_message(
+            adaptation, bot_token, content_format, attribution=attribution,
+        )
 
         # Flash posts NEVER have covers
         if content_format == "flash":
@@ -211,23 +218,44 @@ class PublishService:
     def _format_message(
         self, adaptation: ChannelAdaptation, bot_token: str,
         content_format: str = "short_post",
+        attribution: dict | None = None,
     ) -> str:
-        """Format the adaptation into a Telegram-ready HTML message.
-
-        Args:
-            adaptation: The content adaptation to format.
-            bot_token: Bot token for TelegramClient initialization.
-            content_format: Content format (flash, short_post, longread).
-
-        Returns:
-            HTML-formatted message string.
-        """
+        """Format the adaptation into a Telegram-ready HTML message."""
         client = TelegramClient(bot_token)
         return client.format_post(
             headline=adaptation.headline or "",
             body=adaptation.body or "",
             content_format=content_format,
+            attribution=attribution,
         )
+
+    def _build_attribution(self, adaptation) -> dict | None:
+        """Resolve source attribution for this adaptation.
+
+        Returns ``{"source_name": str, "source_url": str}`` when the material
+        was attached a source-feed image (``cover_image.origin = source_feed``);
+        otherwise None — AI-generated covers don't get a photo credit since
+        we generated them ourselves.
+        """
+        from app.models.material import RawMaterial
+        from app.models.source import Source
+
+        material = self.session.get(RawMaterial, adaptation.material_id)
+        if not material:
+            return None
+
+        meta = material.metadata_ or {}
+        cover_info = meta.get("cover_image") or {}
+        if cover_info.get("origin") != "source_feed":
+            return None
+
+        source = self.session.get(Source, material.source_id) if material.source_id else None
+        source_name = source.name if source else (meta.get("feed_title") or "источник")
+
+        return {
+            "source_name": source_name,
+            "source_url": material.original_url,
+        }
 
     def _get_cover_image(self, adaptation) -> bytes | None:
         """Try to load cover image from MinIO.

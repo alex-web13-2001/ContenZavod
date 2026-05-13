@@ -49,8 +49,65 @@ def _parse_date(entry: dict[str, Any]) -> datetime | None:
     return None
 
 
-async def fetch_full_article(url: str, timeout: int = 15) -> str | None:
-    """Fetch the full article text from a URL."""
+def _extract_image_from_entry(entry: dict[str, Any]) -> str | None:
+    """Extract image URL from a feedparser entry.
+
+    Checks (in order):
+      1. media_content (Yahoo Media RSS — most reliable)
+      2. media_thumbnail
+      3. enclosures (standard RSS with type="image/*")
+      4. <img> tag inside content/summary HTML
+    Returns None if no usable image found.
+    """
+    # 1. media:content
+    media = entry.get("media_content") or []
+    for m in media:
+        url = m.get("url", "")
+        mtype = m.get("medium") or m.get("type") or ""
+        if url and (mtype.startswith("image") or not mtype):
+            return url
+
+    # 2. media:thumbnail
+    thumbs = entry.get("media_thumbnail") or []
+    for t in thumbs:
+        if t.get("url"):
+            return t["url"]
+
+    # 3. enclosures
+    encs = entry.get("enclosures") or []
+    for enc in encs:
+        url = enc.get("href") or enc.get("url", "")
+        if url and (enc.get("type", "").startswith("image") or url.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))):
+            return url
+
+    # 4. <img> in content/summary
+    html_blob = ""
+    if entry.get("content"):
+        try:
+            html_blob = entry.content[0].get("value", "")
+        except Exception:
+            pass
+    if not html_blob:
+        html_blob = entry.get("summary", "")
+    if html_blob:
+        m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html_blob, re.I)
+        if m:
+            return m.group(1)
+
+    return None
+
+
+async def fetch_article_meta(
+    url: str,
+    timeout: int = 15,
+    want_text: bool = True,
+    want_image: bool = True,
+) -> dict[str, str | None]:
+    """Fetch the article page; extract full text and/or og:image.
+
+    Single HTTP request — both extractions from the same response.
+    Returns dict with optional 'text' and 'image_url' keys (None on failure).
+    """
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             resp = await client.get(url, headers={
@@ -59,29 +116,56 @@ async def fetch_full_article(url: str, timeout: int = 15) -> str | None:
             resp.raise_for_status()
     except Exception as e:
         logger.warning("scraper.fetch_failed", url=url, error=str(e))
-        return None
+        return {"text": None, "image_url": None}
 
     soup = BeautifulSoup(resp.text, "html.parser")
+    result: dict[str, str | None] = {"text": None, "image_url": None}
 
-    # Try common article selectors
-    for selector in [
-        "article",
-        '[class*="article-body"]',
-        '[class*="entry-content"]',
-        '[class*="post-content"]',
-        '[class*="story-body"]',
-        "main",
-    ]:
-        el = soup.select_one(selector)
-        if el:
-            # Remove scripts, styles, nav, ads
-            for junk in el.select("script, style, nav, aside, [class*='ad-'], [class*='sidebar']"):
-                junk.decompose()
-            text = el.get_text(separator=" ", strip=True)
-            if len(text) > 200:
-                return text
+    # ── Text: try common article selectors ──
+    if want_text:
+        for selector in [
+            "article",
+            '[class*="article-body"]',
+            '[class*="entry-content"]',
+            '[class*="post-content"]',
+            '[class*="story-body"]',
+            "main",
+        ]:
+            el = soup.select_one(selector)
+            if el:
+                for junk in el.select("script, style, nav, aside, [class*='ad-'], [class*='sidebar']"):
+                    junk.decompose()
+                text = el.get_text(separator=" ", strip=True)
+                if len(text) > 200:
+                    result["text"] = text
+                    break
 
-    return None
+    # ── Image: og:image / twitter:image ──
+    if want_image:
+        for prop in ["og:image", "og:image:url", "twitter:image", "twitter:image:src"]:
+            tag = soup.find("meta", property=prop) or soup.find("meta", attrs={"name": prop})
+            if tag and tag.get("content"):
+                result["image_url"] = tag["content"]
+                break
+        # Fallback: first significant <img> in article body
+        if not result["image_url"]:
+            for el_sel in ["article img", '[class*="article"] img', "main img"]:
+                img = soup.select_one(el_sel)
+                if img and img.get("src"):
+                    src = img["src"]
+                    if "logo" in src.lower() or "icon" in src.lower() or "placeholder" in src.lower():
+                        continue
+                    result["image_url"] = src
+                    break
+
+    return result
+
+
+# Backwards-compat wrapper used in older code paths
+async def fetch_full_article(url: str, timeout: int = 15) -> str | None:
+    """Legacy alias — returns only the article text."""
+    meta = await fetch_article_meta(url, timeout=timeout, want_text=True, want_image=False)
+    return meta.get("text")
 
 
 async def parse_rss_feed(
@@ -126,11 +210,20 @@ async def parse_rss_feed(
 
         content_text = _clean_html(raw_content) if raw_content else ""
 
-        # Optionally fetch full article
-        if fetch_full_text and len(content_text) < 500:
-            full = await fetch_full_article(link)
-            if full and len(full) > len(content_text):
-                content_text = full
+        # Try cheap image extraction from RSS entry first (no extra HTTP)
+        image_url = _extract_image_from_entry(entry)
+
+        # If we need text OR image, hit the article page once and grab both
+        need_text = fetch_full_text and len(content_text) < 500
+        need_image = not image_url
+        if need_text or need_image:
+            article = await fetch_article_meta(
+                link, want_text=need_text, want_image=need_image,
+            )
+            if need_text and article.get("text") and len(article["text"]) > len(content_text):
+                content_text = article["text"]
+            if need_image and article.get("image_url"):
+                image_url = article["image_url"]
 
         if not content_text:
             content_text = title  # fallback
@@ -155,6 +248,7 @@ async def parse_rss_feed(
             "content_hash": cHash,
             "word_count": _word_count(content_text),
             "published_at": pub_date,
+            "image_url": image_url,  # candidate source image; downloaded by worker
             "metadata_": meta,
         })
 

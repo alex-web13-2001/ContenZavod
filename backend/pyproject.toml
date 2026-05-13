@@ -39,6 +39,7 @@ dependencies = [
     # Parsing
     "feedparser>=6.0.0",
     "beautifulsoup4>=4.12.0",
+    "pillow>=10.0.0",
 
     # Object storage
     "minio>=7.2.0",

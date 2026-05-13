@@ -85,13 +85,23 @@ class TelegramClient:
         self.bot_token = bot_token
         self.timeout = timeout
 
-    def format_post(self, headline: str, body: str, content_format: str = "short_post") -> str:
+    def format_post(
+        self,
+        headline: str,
+        body: str,
+        content_format: str = "short_post",
+        attribution: dict | None = None,
+    ) -> str:
         """Format headline + body into a Telegram-ready HTML message.
 
         Args:
             headline: Post headline (will be bolded).
             body: Post body in markdown.
             content_format: Content format (flash, short_post, longread).
+            attribution: Optional ``{"source_name": str, "source_url": str}``.
+                When provided, appends ``📷 {source_name}`` as an HTML link
+                at the bottom (uses the cover-image emoji to make it clear
+                the credit covers BOTH the photo and the underlying story).
 
         Returns:
             HTML string within Telegram's 4096-char limit.
@@ -103,7 +113,19 @@ class TelegramClient:
             raw_text = f"**{headline}**\n\n{body}" if headline else body
         html_text = markdown_to_telegram_html(raw_text)
 
-        if len(html_text) > MAX_MESSAGE_LENGTH:
+        # Attribution suffix
+        if attribution and attribution.get("source_url") and attribution.get("source_name"):
+            from html import escape
+            credit = (
+                f'\n\n<a href="{escape(attribution["source_url"], quote=True)}">'
+                f'📷 {escape(attribution["source_name"])}</a>'
+            )
+            # Keep room for the credit line inside the 4096 limit
+            budget = MAX_MESSAGE_LENGTH - len(credit)
+            if len(html_text) > budget:
+                html_text = html_text[: budget - 3] + "..."
+            html_text = html_text + credit
+        elif len(html_text) > MAX_MESSAGE_LENGTH:
             html_text = html_text[: MAX_MESSAGE_LENGTH - 3] + "..."
 
         return html_text

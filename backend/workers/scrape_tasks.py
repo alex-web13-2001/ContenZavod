@@ -6,12 +6,16 @@ Task flow:
 """
 
 import asyncio
+import hashlib
+import io
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
+import httpx
 import structlog
 from celery import shared_task
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from app.database import get_sync_session
 from app.models.material import RawMaterial
@@ -19,6 +23,115 @@ from app.models.source import Source
 from scraper.rss_parser import discover_feed_url, parse_rss_feed
 
 logger = structlog.get_logger()
+
+# Source-image rules
+SOURCE_IMAGE_MIN_BYTES = 5_000          # < 5 KB → almost certainly an icon
+SOURCE_IMAGE_MIN_DIMENSION = 400        # both width and height must clear this
+SOURCE_IMAGE_MAX_BYTES = 8_000_000      # cap download size to 8 MB
+SOURCE_IMAGE_TIMEOUT = 15.0
+SOURCE_IMAGE_BAD_URL_TOKENS = (
+    "logo", "default", "placeholder", "share", "social-card", "og-default",
+)
+# If the same SHA-256 image is seen ≥ this many times in one source, it's a
+# default share-image and should not be used as a cover.
+DEFAULT_IMAGE_THRESHOLD = 3
+
+
+def _fetch_source_image(
+    url: str, default_hashes: set[str]
+) -> tuple[bytes, str, str] | None:
+    """Download a candidate image URL and validate.
+
+    Returns (data, content_type, sha256) on success, None on rejection.
+    Rejection reasons: HTTP failure, too small, banned URL tokens, dimension
+    check fail, or hash recognised as a known default for this source.
+    """
+    lower = url.lower()
+    if any(tok in lower for tok in SOURCE_IMAGE_BAD_URL_TOKENS):
+        return None
+
+    try:
+        with httpx.Client(timeout=SOURCE_IMAGE_TIMEOUT, follow_redirects=True) as client:
+            resp = client.get(url, headers={
+                "User-Agent": "ContenZavod/1.0 (news aggregator; +https://contenzavod.io)",
+            })
+            resp.raise_for_status()
+    except Exception as e:
+        logger.warning("source_image.fetch_failed", url=url, error=str(e))
+        return None
+
+    data = resp.content
+    if not data or len(data) < SOURCE_IMAGE_MIN_BYTES or len(data) > SOURCE_IMAGE_MAX_BYTES:
+        return None
+
+    content_type = resp.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if not content_type.startswith("image/"):
+        return None
+
+    sha = hashlib.sha256(data).hexdigest()
+    if sha in default_hashes:
+        logger.info("source_image.dedup_default", url=url, sha=sha[:12])
+        return None
+
+    # Dimension check via Pillow if available; if not installed, skip the
+    # check (size-in-bytes filter above already removes most icons).
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(data))
+        if min(img.size) < SOURCE_IMAGE_MIN_DIMENSION:
+            return None
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug("source_image.pillow_warning", error=str(e))
+        # If Pillow can't decode, don't reject — let downstream handle it
+
+    return data, content_type, sha
+
+
+def _store_source_image(
+    data: bytes, content_type: str, sha256_hex: str,
+) -> str:
+    """Upload image to MinIO under source-covers/{sha}.{ext}. Returns API path."""
+    from app.services.storage import upload_bytes
+
+    ext = ".jpg"
+    if "png" in content_type:
+        ext = ".png"
+    elif "webp" in content_type:
+        ext = ".webp"
+    elif "gif" in content_type:
+        ext = ".gif"
+
+    object_name = f"source-covers/{sha256_hex}{ext}"
+    # Idempotent: if the same content was already uploaded, MinIO accepts the
+    # PUT and overwrites with identical bytes — cheap, no need to pre-check.
+    upload_bytes(data, object_name, content_type)
+    return f"/api/v1/files/{object_name}"
+
+
+def _load_default_hashes_for_source(session, source_id: uuid.UUID) -> set[str]:
+    """Hashes that appear ≥ DEFAULT_IMAGE_THRESHOLD times in this source.
+
+    These are almost certainly share-default images (one big og:image used
+    for every article). We won't attach them as covers.
+    """
+    rows = session.execute(
+        text(
+            """
+            SELECT metadata->'cover_image'->>'sha256' AS sha,
+                   COUNT(*) AS c
+              FROM raw_materials
+             WHERE source_id = :sid
+               AND metadata->'cover_image'->>'sha256' IS NOT NULL
+             GROUP BY 1
+            HAVING COUNT(*) >= :threshold
+            """
+        ),
+        {"sid": str(source_id), "threshold": DEFAULT_IMAGE_THRESHOLD},
+    ).all()
+    return {r[0] for r in rows if r[0]}
 
 
 def _run_async(coro):
@@ -83,10 +196,55 @@ def scrape_source(self, source_id: str, tenant_id: str):
             ).all()
         )
 
+        # Per-source default-image hashes (share-default og:images used on every
+        # article). Computed once per scrape — see _load_default_hashes_for_source.
+        default_hashes = _load_default_hashes_for_source(session, source.id)
+        # Track hashes attached in this batch — if the same image is offered
+        # again later in the loop, count it against the "default" threshold.
+        batch_image_counts: dict[str, int] = {}
+
         new_count = 0
+        new_image_count = 0
         for mat_data in materials:
             if mat_data["content_hash"] in existing_hashes:
                 continue
+
+            meta = mat_data.get("metadata_", {}) or {}
+
+            # Try to attach a source image (one HTTP per new material, capped).
+            image_url = mat_data.get("image_url")
+            if image_url:
+                fetched = _fetch_source_image(image_url, default_hashes)
+                if fetched:
+                    img_bytes, ct, sha = fetched
+
+                    # Intra-batch dedup: if the same image has already shown up
+                    # multiple times in this scrape, treat it as a default.
+                    seen_this_batch = batch_image_counts.get(sha, 0)
+                    if seen_this_batch + 1 >= DEFAULT_IMAGE_THRESHOLD:
+                        default_hashes.add(sha)  # protect remaining materials
+                        log.info(
+                            "source_image.batch_default_detected",
+                            sha=sha[:12], seen=seen_this_batch + 1,
+                        )
+                    else:
+                        try:
+                            stored_path = _store_source_image(img_bytes, ct, sha)
+                            meta["cover_image"] = {
+                                "url": stored_path,           # served by /api/v1/files/...
+                                "source_url": image_url,      # original where we got it
+                                "sha256": sha,
+                                "size_bytes": len(img_bytes),
+                                "origin": "source_feed",
+                            }
+                            meta["cover_status"] = "ready"
+                            new_image_count += 1
+                            batch_image_counts[sha] = seen_this_batch + 1
+                        except Exception as e:
+                            log.warning(
+                                "source_image.upload_failed",
+                                url=image_url, error=str(e),
+                            )
 
             material = RawMaterial(
                 source_id=source.id,
@@ -96,7 +254,7 @@ def scrape_source(self, source_id: str, tenant_id: str):
                 content_text=mat_data["content_text"],
                 content_html=mat_data.get("content_html"),
                 content_hash=mat_data["content_hash"],
-                metadata_=mat_data.get("metadata_", {}),
+                metadata_=meta,
                 word_count=mat_data.get("word_count"),
                 published_at=mat_data.get("published_at"),
                 scraped_at=datetime.now(timezone.utc),
@@ -112,8 +270,16 @@ def scrape_source(self, source_id: str, tenant_id: str):
         source.error_count = 0
         session.commit()
 
-        log.info("scrape.done", new=new_count, total=len(materials))
-        return {"status": "ok", "new": new_count, "total": len(materials)}
+        log.info(
+            "scrape.done",
+            new=new_count, total=len(materials), with_images=new_image_count,
+        )
+        return {
+            "status": "ok",
+            "new": new_count,
+            "total": len(materials),
+            "with_images": new_image_count,
+        }
 
 
 @shared_task(name="workers.scrape_tasks.scrape_all_active_sources")

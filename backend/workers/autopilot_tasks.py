@@ -688,18 +688,32 @@ def autopilot_rank_and_queue(self):
                     needs_cover = False
 
                 if needs_cover and not adapt.cover_status:
-                    adapt.cover_status = "generating"
-                    adapt.cover_retry_count = 0
-                    session.flush()
+                    # Prefer the source image if the material already has one
+                    # (extracted at scrape time). Saves a Kling/Claude call.
+                    mat_meta = (material.metadata_ or {})
+                    src_cover = mat_meta.get("cover_image") if mat_meta.get("cover_status") == "ready" else None
+                    if src_cover and src_cover.get("url"):
+                        adapt.cover_image_url = src_cover["url"]
+                        adapt.cover_status = "ready"
+                        session.flush()
+                        log.info(
+                            "autopilot.cover_from_source",
+                            adaptation_id=str(adapt.id),
+                            sha=src_cover.get("sha256", "")[:12],
+                        )
+                    else:
+                        adapt.cover_status = "generating"
+                        adapt.cover_retry_count = 0
+                        session.flush()
 
-                    from workers.ai_tasks import generate_adaptation_cover
-                    generate_adaptation_cover.delay(
-                        str(adapt.id), str(adapt.tenant_id)
-                    )
-                    log.info(
-                        "autopilot.cover_dispatched",
-                        adaptation_id=str(adapt.id),
-                    )
+                        from workers.ai_tasks import generate_adaptation_cover
+                        generate_adaptation_cover.delay(
+                            str(adapt.id), str(adapt.tenant_id)
+                        )
+                        log.info(
+                            "autopilot.cover_dispatched",
+                            adaptation_id=str(adapt.id),
+                        )
 
                 log.info(
                     "autopilot.queued",
