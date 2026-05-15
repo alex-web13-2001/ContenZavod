@@ -680,18 +680,17 @@ def autopilot_rank_and_queue(self):
                 queued_by_lang[lang] = queued_by_lang.get(lang, 0) + 1
                 queued_formats[fmt] = queued_formats.get(fmt, 0) + 1
 
-                # Cover generation: flash NEVER gets covers, others follow policy
-                needs_cover = True
-                if fmt == "flash":
-                    needs_cover = False
-                elif config.get("cover_policy") == "never":
-                    needs_cover = False
-
-                if needs_cover and not adapt.cover_status:
-                    # Prefer the source image if the material already has one
-                    # (extracted at scrape time). Saves a Kling/Claude call.
+                # Cover policy:
+                #   * Any format with a source image → attach it (free).
+                #   * Non-flash without source image → trigger AI gen.
+                #   * Flash without source image → no cover (by design).
+                if not adapt.cover_status:
                     mat_meta = (material.metadata_ or {})
-                    src_cover = mat_meta.get("cover_image") if mat_meta.get("cover_status") == "ready" else None
+                    src_cover = (
+                        mat_meta.get("cover_image")
+                        if mat_meta.get("cover_status") == "ready"
+                        else None
+                    )
                     if src_cover and src_cover.get("url"):
                         adapt.cover_image_url = src_cover["url"]
                         adapt.cover_status = "ready"
@@ -699,9 +698,10 @@ def autopilot_rank_and_queue(self):
                         log.info(
                             "autopilot.cover_from_source",
                             adaptation_id=str(adapt.id),
+                            format=fmt,
                             sha=src_cover.get("sha256", "")[:12],
                         )
-                    else:
+                    elif fmt != "flash" and config.get("cover_policy") != "never":
                         adapt.cover_status = "generating"
                         adapt.cover_retry_count = 0
                         session.flush()

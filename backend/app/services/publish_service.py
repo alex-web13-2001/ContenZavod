@@ -82,11 +82,15 @@ class PublishService:
             adaptation, bot_token, content_format, attribution=attribution,
         )
 
-        # Flash posts NEVER have covers
+        # Cover policy:
+        #   * Any format with a real source image → use it (free, instant).
+        #   * Non-flash format without source image → use AI cover if ready.
+        #   * Flash without source image → no cover (the original design:
+        #     a flash post is "naked fact, no visual"; we don't burn an AI
+        #     gen on it).
         if content_format == "flash":
-            cover_data = None
+            cover_data = self._get_cover_image(adaptation) if attribution else None
         else:
-            # Check for cover image: adaptation-level first, then material fallback
             cover_data = self._get_cover_image(adaptation)
 
         if cover_data:

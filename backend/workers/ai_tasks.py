@@ -657,8 +657,11 @@ def adapt_and_enqueue_autopilot(
         session.add(queue_item)
         session.commit()
 
-        # Cover: prefer source image (zero-cost), AI as fallback. Flash never.
-        if content_format != "flash" and not adaptation.cover_status:
+        # Cover policy (same as autopilot_rank_and_queue):
+        #   * Any format with a source image → attach it.
+        #   * Non-flash without source image → AI gen.
+        #   * Flash without source image → no cover.
+        if not adaptation.cover_status:
             material_for_cover = session.get(RawMaterial, uuid.UUID(material_id))
             mat_meta = (material_for_cover.metadata_ or {}) if material_for_cover else {}
             src_cover = (
@@ -672,9 +675,10 @@ def adapt_and_enqueue_autopilot(
                 session.commit()
                 log.info(
                     "autopilot.manual_enqueue.cover_from_source",
+                    format=content_format,
                     sha=(src_cover.get("sha256") or "")[:12],
                 )
-            else:
+            elif content_format != "flash":
                 adaptation.cover_status = "generating"
                 adaptation.cover_retry_count = 0
                 session.commit()
