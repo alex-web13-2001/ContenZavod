@@ -864,6 +864,42 @@ def autopilot_publish_next(self):
                     )
                     continue
 
+            # Cover-SHA dedup at publish time. rank_and_queue already does this
+            # check at enqueue, but an item may have been queued hours ago while
+            # a duplicate slipped past separately. Last line of defence.
+            cover_sha_pub = ((mat.metadata_ or {}).get("cover_image") or {}).get("sha256") if mat else None
+            if cover_sha_pub:
+                already_pub = session.execute(
+                    text(
+                        """
+                        SELECT 1 FROM autopilot_queue apq
+                          JOIN channel_adaptations ca ON ca.id = apq.adaptation_id
+                          JOIN raw_materials m       ON m.id  = ca.material_id
+                         WHERE apq.channel_id = :ch
+                           AND apq.status = 'published'
+                           AND apq.published_at >= :cutoff
+                           AND m.metadata->'cover_image'->>'sha256' = :sha
+                           AND apq.id != :self_id
+                         LIMIT 1
+                        """
+                    ),
+                    {
+                        "ch": str(item.channel_id),
+                        "cutoff": now - timedelta(hours=24),
+                        "sha": cover_sha_pub,
+                        "self_id": str(item.id),
+                    },
+                ).scalar()
+                if already_pub:
+                    item.status = "skipped"
+                    item.skip_reason = "cover_sha_dup_at_publish_time"
+                    log.info(
+                        "autopilot.skip_cover_sha_at_publish",
+                        adaptation_id=str(item.adaptation_id),
+                        cover_sha=cover_sha_pub[:12],
+                    )
+                    continue
+
             adapt_lang = adaptation.language or "ru"
             lang_cfg = _get_language_config(config, adapt_lang)
 
