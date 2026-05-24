@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 from celery import shared_task
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select, text
 
 from app.database import get_sync_session
 
@@ -384,6 +384,34 @@ def autopilot_rank_and_queue(self):
             ).scalars().all()
             already_published_materials = set(already_queued_material_ids)
 
+            # Cross-source dedup by cover image SHA: two outlets often republish
+            # the same wire-photo for the same story. If we've already published
+            # something with this exact image in the last 24h, treat the new
+            # candidate as a likely retelling and skip it. Catches cases the
+            # semantic dedup misses when entity overlap is just under threshold.
+            sha_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            recently_published_cover_shas: set[str] = set()
+            try:
+                cover_sha_rows = session.execute(
+                    text(
+                        """
+                        SELECT DISTINCT m.metadata->'cover_image'->>'sha256' AS sha
+                          FROM autopilot_queue apq
+                          JOIN channel_adaptations ca ON ca.id = apq.adaptation_id
+                          JOIN raw_materials m       ON m.id  = ca.material_id
+                         WHERE apq.channel_id = :ch
+                           AND apq.status = 'published'
+                           AND apq.published_at >= :cutoff
+                           AND m.metadata->'cover_image'->>'sha256' IS NOT NULL
+                        """
+                    ),
+                    {"ch": str(channel.id), "cutoff": sha_cutoff},
+                ).all()
+                recently_published_cover_shas = {r[0] for r in cover_sha_rows if r[0]}
+            except Exception as e:
+                # Don't break ranking on a dedup-query glitch
+                log.warning("autopilot.cover_sha_dedup_query_failed", error=str(e))
+
             # Hard freshness cutoff: never enqueue materials older than this.
             # Configurable per-channel via autopilot_config.max_material_age_hours.
             # Default 24h, see ADR-007.
@@ -519,6 +547,20 @@ def autopilot_rank_and_queue(self):
                 if not material:
                     continue
 
+                # Cross-source image dedup: same wire-photo as something we
+                # just published almost certainly means we're about to publish
+                # the same story again. Tracked separately on the in-cycle set
+                # so multiple candidates in the same batch don't all sneak past.
+                cover_sha = ((material.metadata_ or {}).get("cover_image") or {}).get("sha256")
+                if cover_sha and cover_sha in recently_published_cover_shas:
+                    log.info(
+                        "autopilot.skip_cover_sha_dup",
+                        material_id=str(material.id),
+                        cover_sha=cover_sha[:12],
+                        title=material.title[:60] if material.title else "",
+                    )
+                    continue
+
                 category = (material.metadata_ or {}).get(
                     "ai_classification", {}
                 ).get("category", "default")
@@ -539,11 +581,11 @@ def autopilot_rank_and_queue(self):
                     material.id, fingerprint, session, adapt.tenant_id
                 )
 
-                # Skip near-duplicates: uniqueness < 4.0 ≈ similarity > 0.6.
-                # Looser than the original 2.0 threshold so two retellings of
-                # the same story (different sources, ≥60% overlap) get caught.
-                # See ADR-007.
-                if uniqueness < 4.0:
+                # Skip near-duplicates: uniqueness < 4.5 ≈ similarity > 0.55.
+                # Tightened from < 4.0 after observing a same-story-different-
+                # source dupe slip through at jaccard ≈ 0.58 (Larnaca terrorism
+                # arrests, Philenews EN + Cyprus Mail). See ADR-007.
+                if uniqueness < 4.5:
                     log.info(
                         "autopilot.skip_duplicate",
                         material_id=str(material.id),
@@ -679,6 +721,13 @@ def autopilot_rank_and_queue(self):
                 total_today += 1
                 queued_by_lang[lang] = queued_by_lang.get(lang, 0) + 1
                 queued_formats[fmt] = queued_formats.get(fmt, 0) + 1
+
+                # Track this cover SHA so a later candidate in the same cycle
+                # carrying the same wire-photo (different source, same story)
+                # gets caught by the cover_sha dedup above.
+                _accepted_sha = ((material.metadata_ or {}).get("cover_image") or {}).get("sha256")
+                if _accepted_sha:
+                    recently_published_cover_shas.add(_accepted_sha)
 
                 # Cover policy:
                 #   * Any format with a source image → attach it (free).
