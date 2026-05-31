@@ -21,6 +21,23 @@ from app.models.material import RawMaterial
 
 log = structlog.get_logger()
 
+# Ubiquitous entities that carry almost no story-identifying signal — they appear
+# in a huge share of Cyprus articles, so they must NOT count toward "same story".
+STOPWORD_ENTITIES: frozenset[str] = frozenset({
+    "cyprus", "republic of cyprus", "kypros", "nicosia", "lefkosia", "limassol",
+    "larnaca", "paphos", "famagusta", "kyrenia", "european union", "eu", "euro",
+    "cyprus mail", "philenews", "in-cyprus", "cna", "politis", "police", "government",
+})
+
+# Cross-source dedup rule (complements Jaccard). The same event reported by two
+# outlets shares the same concrete named entities even when each adds its own
+# extras — so Jaccard stays low (~0.25) while the count of shared SPECIFIC
+# entities is high. If that count clears the bar AND covers a real fraction of
+# the smaller fingerprint, treat it as a duplicate regardless of Jaccard.
+SPECIFIC_OVERLAP_MIN = 3        # ≥ this many shared non-stopword entities
+SPECIFIC_OVERLAP_FRACTION = 0.30  # AND ≥ this fraction of the smaller specific set
+DUPLICATE_UNIQUENESS = 3.0      # forced score when the rule fires (< autopilot's 4.5 skip)
+
 
 def _jaccard_similarity(set_a: set[str], set_b: set[str]) -> float:
     """Compute Jaccard similarity between two sets.
@@ -92,8 +109,13 @@ def compute_uniqueness_score(
     if not recent:
         return 10.0
 
+    # Specific (non-stopword) entities of the candidate — used for the
+    # cross-source overlap rule that Jaccard alone misses.
+    fp_specific = fp_set - STOPWORD_ENTITIES
+
     max_sim = 0.0
     most_similar_id = None
+    overlap_hit: tuple[uuid.UUID, int, int] | None = None  # (id, shared, smaller_set)
 
     for row_id, other_fp_raw in recent:
         if not other_fp_raw or not isinstance(other_fp_raw, list):
@@ -108,6 +130,19 @@ def compute_uniqueness_score(
             max_sim = sim
             most_similar_id = row_id
 
+        # Cross-source overlap check on SPECIFIC entities only.
+        other_specific = other_set - STOPWORD_ENTITIES
+        shared = len(fp_specific & other_specific)
+        smaller = min(len(fp_specific), len(other_specific))
+        if (
+            smaller > 0
+            and shared >= SPECIFIC_OVERLAP_MIN
+            and shared / smaller >= SPECIFIC_OVERLAP_FRACTION
+        ):
+            # Keep the strongest overlap (most shared specific entities)
+            if overlap_hit is None or shared > overlap_hit[1]:
+                overlap_hit = (row_id, shared, smaller)
+
     if max_sim > 0.5:
         log.info(
             "dedup.similar_found",
@@ -117,8 +152,25 @@ def compute_uniqueness_score(
             entities_overlap=round(max_sim * len(fp_set)),
         )
 
-    score = round(10.0 * (1.0 - max_sim), 2)
-    return max(0.0, min(10.0, score))
+    jaccard_score = round(10.0 * (1.0 - max_sim), 2)
+
+    # If the cross-source rule fired, force a duplicate-level score (overriding a
+    # deceptively-high Jaccard score). This catches the same story told by two
+    # outlets in different words/languages, where Jaccard stays ~0.25.
+    if overlap_hit is not None:
+        forced = min(jaccard_score, DUPLICATE_UNIQUENESS)
+        log.info(
+            "dedup.cross_source_overlap",
+            material_id=str(material_id),
+            similar_to=str(overlap_hit[0]),
+            shared_specific=overlap_hit[1],
+            smaller_specific_set=overlap_hit[2],
+            jaccard_score=jaccard_score,
+            forced_score=forced,
+        )
+        return max(0.0, min(10.0, forced))
+
+    return max(0.0, min(10.0, jaccard_score))
 
 
 def is_duplicate(
