@@ -54,6 +54,7 @@
 - Статус-индикаторы: «✅ Опубликовано в Telegram» / «⏳ Одобрено — публикация в очереди»
 
 ### Changed
+- Обложки из источника: одно изображение теперь используется максимум на одном посте. `_fetch_source_image` отклоняет SHA, уже привязанный к другому материалу того же источника (`_load_used_cover_hashes`, заменил порог `DEFAULT_IMAGE_THRESHOLD`). Раньше общее/рубричное/wire-фото попадало обложкой на 3+ разных новостей.
 - `autopilot_rank_and_queue` и lazy-adapt: добавлен JOIN с `raw_materials` и фильтр по `scraped_at >= now() - max_material_age_hours`
 - Порог семантического дедупа в `autopilot_rank_and_queue` ослаблен с `uniqueness < 2.0` (similarity > 0.8) на `< 4.0` (similarity > 0.6)
 - Промпт `short_post`: длина с 300–700 на **250–500** символов, ужесточена краткость
@@ -68,6 +69,8 @@
 - `publish_tasks.py`: вынесена бизнес-логика в `PublishService` + `TelegramClient` (было 200 строк → 55)
 
 ### Fixed
+- **Классификатор укреплён (причина дублей постов).** С 25 мая модели KIE (Gemini 3.1 Pro, Claude Haiku) перестали вызывать инструмент `classify_article` и отвечали прозой — `key_entities` приходил пустым, `semantic_fingerprint` не заполнялся, и семантический дедуп молча отключался (`uniqueness` по умолчанию = 10.0), из-за чего одинаковые новости публиковались повторно. Добавлен `tool_choice` (форсированный вызов tool'а) для обоих провайдеров + валидация `_validate_classification`: результат с пустыми `key_entities`/`summary_ru` отклоняется → фоллбэк на Claude → Celery-ретрай. Устраняет ~40% холостых `no_tool_result` и дубли постов.
+- Семантический дедуп (`compute_uniqueness_score`) сравнивал кандидата только со статусами `classified/adapting/adapted/published`, пропуская доминирующий `evaluated` — теперь `evaluated` включён в пул сравнения.
 - Удалён soft `freshness floor = 5.0` в `_compute_freshness` — из-за него старые материалы с высоким rel/hype прорывались в очередь публикации (см. ADR-007). Теперь просроченные по TTL получают 0 и естественно отсекаются.
 - Исправлен дефолтный формат для Telegram: теперь генерируется short_post вместо longread
 - Исправлен ORM-атрибут `metadata` → `metadata_` в запросах категорий
