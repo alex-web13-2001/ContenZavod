@@ -32,19 +32,20 @@ SOURCE_IMAGE_TIMEOUT = 15.0
 SOURCE_IMAGE_BAD_URL_TOKENS = (
     "logo", "default", "placeholder", "share", "social-card", "og-default",
 )
-# If the same SHA-256 image is seen ≥ this many times in one source, it's a
-# default share-image and should not be used as a cover.
-DEFAULT_IMAGE_THRESHOLD = 3
+# A genuine article hero photo is used exactly once. If a source-image SHA is
+# already attached to another material from the same source, it's a shared/
+# section/wire photo — we must NOT reuse it as a cover (that's how one photo
+# ended up on several unrelated posts). Enforced via _load_used_cover_hashes.
 
 
 def _fetch_source_image(
-    url: str, default_hashes: set[str]
+    url: str, blocked_hashes: set[str]
 ) -> tuple[bytes, str, str] | None:
     """Download a candidate image URL and validate.
 
     Returns (data, content_type, sha256) on success, None on rejection.
     Rejection reasons: HTTP failure, too small, banned URL tokens, dimension
-    check fail, or hash recognised as a known default for this source.
+    check fail, or hash already used as a cover for this source (blocked_hashes).
     """
     lower = url.lower()
     if any(tok in lower for tok in SOURCE_IMAGE_BAD_URL_TOKENS):
@@ -69,8 +70,8 @@ def _fetch_source_image(
         return None
 
     sha = hashlib.sha256(data).hexdigest()
-    if sha in default_hashes:
-        logger.info("source_image.dedup_default", url=url, sha=sha[:12])
+    if sha in blocked_hashes:
+        logger.info("source_image.already_used_skip", url=url, sha=sha[:12])
         return None
 
     # Dimension check via Pillow if available; if not installed, skip the
@@ -111,25 +112,24 @@ def _store_source_image(
     return f"/api/v1/files/{object_name}"
 
 
-def _load_default_hashes_for_source(session, source_id: uuid.UUID) -> set[str]:
-    """Hashes that appear ≥ DEFAULT_IMAGE_THRESHOLD times in this source.
+def _load_used_cover_hashes(session, source_id: uuid.UUID) -> set[str]:
+    """All cover-image SHAs already attached to materials in this source.
 
-    These are almost certainly share-default images (one big og:image used
-    for every article). We won't attach them as covers.
+    Any image used once is off-limits for new covers: a real per-article photo
+    never legitimately reappears, so a repeat SHA is a shared/section/wire image.
+    This guarantees one image is used on at most one post per source — fixing
+    the "same photo on several unrelated news items" bug.
     """
     rows = session.execute(
         text(
             """
-            SELECT metadata->'cover_image'->>'sha256' AS sha,
-                   COUNT(*) AS c
+            SELECT DISTINCT metadata->'cover_image'->>'sha256' AS sha
               FROM raw_materials
              WHERE source_id = :sid
                AND metadata->'cover_image'->>'sha256' IS NOT NULL
-             GROUP BY 1
-            HAVING COUNT(*) >= :threshold
             """
         ),
-        {"sid": str(source_id), "threshold": DEFAULT_IMAGE_THRESHOLD},
+        {"sid": str(source_id)},
     ).all()
     return {r[0] for r in rows if r[0]}
 
@@ -196,12 +196,11 @@ def scrape_source(self, source_id: str, tenant_id: str):
             ).all()
         )
 
-        # Per-source default-image hashes (share-default og:images used on every
-        # article). Computed once per scrape — see _load_default_hashes_for_source.
-        default_hashes = _load_default_hashes_for_source(session, source.id)
-        # Track hashes attached in this batch — if the same image is offered
-        # again later in the loop, count it against the "default" threshold.
-        batch_image_counts: dict[str, int] = {}
+        # All cover-image SHAs already used by this source. An image used once
+        # must never become another post's cover (the "same photo on many news
+        # items" bug). Seeded from the DB, then updated in-loop so repeats
+        # within this same scrape batch are blocked too.
+        used_cover_hashes = _load_used_cover_hashes(session, source.id)
 
         new_count = 0
         new_image_count = 0
@@ -212,39 +211,30 @@ def scrape_source(self, source_id: str, tenant_id: str):
             meta = mat_data.get("metadata_", {}) or {}
 
             # Try to attach a source image (one HTTP per new material, capped).
+            # _fetch_source_image rejects any SHA already in used_cover_hashes,
+            # so each distinct image lands on at most one material.
             image_url = mat_data.get("image_url")
             if image_url:
-                fetched = _fetch_source_image(image_url, default_hashes)
+                fetched = _fetch_source_image(image_url, used_cover_hashes)
                 if fetched:
                     img_bytes, ct, sha = fetched
-
-                    # Intra-batch dedup: if the same image has already shown up
-                    # multiple times in this scrape, treat it as a default.
-                    seen_this_batch = batch_image_counts.get(sha, 0)
-                    if seen_this_batch + 1 >= DEFAULT_IMAGE_THRESHOLD:
-                        default_hashes.add(sha)  # protect remaining materials
-                        log.info(
-                            "source_image.batch_default_detected",
-                            sha=sha[:12], seen=seen_this_batch + 1,
+                    try:
+                        stored_path = _store_source_image(img_bytes, ct, sha)
+                        meta["cover_image"] = {
+                            "url": stored_path,           # served by /api/v1/files/...
+                            "source_url": image_url,      # original where we got it
+                            "sha256": sha,
+                            "size_bytes": len(img_bytes),
+                            "origin": "source_feed",
+                        }
+                        meta["cover_status"] = "ready"
+                        new_image_count += 1
+                        used_cover_hashes.add(sha)  # block reuse later in this batch
+                    except Exception as e:
+                        log.warning(
+                            "source_image.upload_failed",
+                            url=image_url, error=str(e),
                         )
-                    else:
-                        try:
-                            stored_path = _store_source_image(img_bytes, ct, sha)
-                            meta["cover_image"] = {
-                                "url": stored_path,           # served by /api/v1/files/...
-                                "source_url": image_url,      # original where we got it
-                                "sha256": sha,
-                                "size_bytes": len(img_bytes),
-                                "origin": "source_feed",
-                            }
-                            meta["cover_status"] = "ready"
-                            new_image_count += 1
-                            batch_image_counts[sha] = seen_this_batch + 1
-                        except Exception as e:
-                            log.warning(
-                                "source_image.upload_failed",
-                                url=image_url, error=str(e),
-                            )
 
             material = RawMaterial(
                 source_id=source.id,
