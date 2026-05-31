@@ -118,6 +118,10 @@ async def _evaluate_via_gemini(user_message: str) -> dict[str, Any] | None:
             {"role": "user", "content": [{"type": "text", "text": user_message}]},
         ],
         "tools": [EVALUATE_TOOL],
+        # Force the model to CALL evaluate_material — without this gemini-3.1-pro
+        # answers in prose (see ai.evaluate.no_tool_calls), producing no score and
+        # stalling materials at status='classified'. Same fix as the classifier.
+        "tool_choice": {"type": "function", "function": {"name": "evaluate_material"}},
         "stream": False,
     }
 
@@ -193,6 +197,8 @@ async def _evaluate_via_claude(user_message: str) -> dict[str, Any] | None:
             {"role": "user", "content": f"{SYSTEM_PROMPT}\n\n{user_message}"},
         ],
         "tools": [EVALUATE_TOOL_CLAUDE],
+        # Force tool use (Anthropic format) — same rationale as the Gemini path.
+        "tool_choice": {"type": "tool", "name": "evaluate_material"},
     }
 
     headers = {
@@ -254,7 +260,11 @@ async def _evaluate_via_claude(user_message: str) -> dict[str, Any] | None:
 async def evaluate_material_for_project(
     material_data: dict[str, Any], topic_guidelines: str, target_audience: str
 ) -> dict[str, Any] | None:
-    """Evaluate a material against project guidelines — Gemini first, Claude fallback.
+    """Evaluate a material against project guidelines — Claude first, Gemini fallback.
+
+    Claude leads because gemini-3.1-pro via KIE currently ignores tool_choice and
+    answers in prose, so leading with Gemini just burned a call + latency before
+    every Claude fallback. Mirrors the classifier's provider order.
 
     Returns evaluation dict with relevance_score, hype_score, is_recommended, explanation.
     Raises AIServiceTemporarilyUnavailable only if ALL providers are down.
@@ -265,20 +275,20 @@ async def evaluate_material_for_project(
 
     user_message = _build_user_message(material_data, topic_guidelines, target_audience)
 
-    # Try Gemini first
-    try:
-        result = await _evaluate_via_gemini(user_message)
-        if result:
-            logger.info("ai.evaluate.success", provider="gemini")
-            return result
-    except AIServiceTemporarilyUnavailable as e:
-        logger.warning("ai.evaluate.gemini_down_trying_claude", error=str(e)[:100])
-
-    # Fallback to Claude Haiku 4.5
+    # Try Claude first (reliable tool-caller)
     try:
         result = await _evaluate_via_claude(user_message)
         if result:
             logger.info("ai.evaluate.success", provider="claude")
+            return result
+    except AIServiceTemporarilyUnavailable as e:
+        logger.warning("ai.evaluate.claude_down_trying_gemini", error=str(e)[:100])
+
+    # Fallback to Gemini 3.1 Pro
+    try:
+        result = await _evaluate_via_gemini(user_message)
+        if result:
+            logger.info("ai.evaluate.success", provider="gemini")
             return result
     except AIServiceTemporarilyUnavailable:
         raise  # Both down — propagate for Celery retry
