@@ -370,7 +370,12 @@ def _parse_claude_response(data: dict, title: str) -> dict[str, Any] | None:
 
 
 async def classify_article(title: str, content: str, url: str = "") -> dict[str, Any] | None:
-    """Classify a single article — tries Gemini first, falls back to Claude Haiku.
+    """Classify a single article — tries Claude Haiku first, falls back to Gemini.
+
+    Claude leads because gemini-3.1-pro via KIE currently ignores tool_choice and
+    answers in prose almost every time (empty key_entities → rejected), so leading
+    with Gemini just burned a call + latency before every Claude fallback. Revisit
+    the order if/when KIE's Gemini honours tool calls again.
 
     Returns classification dict or None on failure.
     Raises AIServiceTemporarilyUnavailable only if ALL providers are down.
@@ -389,21 +394,21 @@ Title: {title}
 URL: {url}
 Content: {truncated}"""
 
-    # Try Gemini first
+    # Try Claude first (reliable tool-caller)
     try:
-        result = await _classify_via_gemini(user_message, title)
+        result = await _classify_via_claude(user_message, title)
         if result:
             return result
     except AIServiceTemporarilyUnavailable as e:
         logger.warning(
-            "ai.classify.gemini_down_trying_claude",
+            "ai.classify.claude_down_trying_gemini",
             error=str(e)[:100],
             title=title[:60],
         )
 
-    # Fallback to Claude Haiku 4.5
+    # Fallback to Gemini 3.1 Pro
     try:
-        result = await _classify_via_claude(user_message, title)
+        result = await _classify_via_gemini(user_message, title)
         if result:
             return result
     except AIServiceTemporarilyUnavailable:
