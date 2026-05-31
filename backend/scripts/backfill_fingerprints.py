@@ -22,6 +22,7 @@ import argparse
 import asyncio
 import os
 import sys
+import uuid
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -110,7 +111,7 @@ def main() -> None:
     updated = 0
     with get_sync_session() as session:
         for mat_id, result in classified.items():
-            material = session.get(RawMaterial, mat_id)
+            material = session.get(RawMaterial, uuid.UUID(mat_id))
             if not material:
                 continue
             meta = dict(material.metadata_ or {})
