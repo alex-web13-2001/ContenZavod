@@ -150,6 +150,10 @@ async def _classify_via_gemini(user_message: str, title: str) -> dict[str, Any] 
             {"role": "user", "content": [{"type": "text", "text": user_message}]},
         ],
         "tools": [CLASSIFY_TOOL],
+        # Force the model to CALL classify_article instead of replying in prose.
+        # Without this, gemini-3.1-pro frequently returns markdown analysis → no
+        # tool result → empty key_entities → semantic dedup silently disabled.
+        "tool_choice": {"type": "function", "function": {"name": "classify_article"}},
         "stream": False,
     }
 
@@ -204,6 +208,8 @@ async def _classify_via_claude(user_message: str, title: str) -> dict[str, Any] 
             {"role": "user", "content": f"{SYSTEM_PROMPT}\n\n{user_message}"},
         ],
         "tools": [CLASSIFY_TOOL_CLAUDE],
+        # Force tool use (Anthropic format) — same rationale as the Gemini path.
+        "tool_choice": {"type": "tool", "name": "classify_article"},
     }
 
     headers = {
@@ -246,6 +252,47 @@ async def _classify_via_claude(user_message: str, title: str) -> dict[str, Any] 
     return _parse_claude_response(data, title)
 
 
+# Categories the downstream pipeline understands (mirrors CLASSIFY_TOOL enum).
+VALID_CATEGORIES = {
+    "politics", "economy", "society", "culture", "sport", "tech",
+    "opinion", "lifestyle", "crime", "environment", "health", "world",
+}
+
+
+def _validate_classification(result: Any, title: str) -> dict[str, Any] | None:
+    """Reject prose-shaped or incomplete classifications.
+
+    A tool result is only usable if it carries the fields the pipeline relies
+    on. The critical one is key_entities: an empty list yields an empty
+    semantic_fingerprint, which silently turns OFF dedup (uniqueness defaults
+    to 10.0 — see ai/deduplicator.py). We'd rather fail and retry/fallback than
+    persist undedupable junk. Category is coerced to lowercase; an out-of-enum
+    value only downgrades to a warning (it just falls back to default buckets).
+    """
+    if not isinstance(result, dict):
+        return None
+
+    entities = result.get("key_entities")
+    if not isinstance(entities, list) or len([e for e in entities if e]) < 3:
+        logger.warning("ai.classify.rejected_empty_entities", title=title[:60])
+        return None
+
+    if not str(result.get("summary_ru") or "").strip():
+        logger.warning("ai.classify.rejected_no_summary", title=title[:60])
+        return None
+
+    category = str(result.get("category") or "").strip().lower()
+    if category and category not in VALID_CATEGORIES:
+        logger.warning(
+            "ai.classify.category_out_of_enum",
+            title=title[:60],
+            category=result.get("category"),
+        )
+    result["category"] = category or "society"
+
+    return result
+
+
 def _parse_openai_response(data: dict, title: str) -> dict[str, Any] | None:
     """Parse OpenAI-compatible response (Gemini via KIE)."""
     choices = data.get("choices", [])
@@ -261,28 +308,30 @@ def _parse_openai_response(data: dict, title: str) -> dict[str, Any] | None:
         if func.get("name") == "classify_article":
             try:
                 input_data = func.get("arguments", "{}")
-                if isinstance(input_data, str):
-                    result = json.loads(input_data)
-                else:
-                    result = input_data
+                result = json.loads(input_data) if isinstance(input_data, str) else input_data
+            except json.JSONDecodeError as e:
+                logger.error("ai.classify.json_parse_error", error=str(e), title=title[:60])
+                return None
 
+            validated = _validate_classification(result, title)
+            if validated is not None:
                 logger.info(
                     "ai.classify.success",
                     provider="gemini",
                     title=title[:60],
-                    category=result.get("category"),
-                    relevance=result.get("relevance_score"),
+                    category=validated.get("category"),
+                    relevance=validated.get("relevance_score"),
                 )
-                return result
-            except json.JSONDecodeError as e:
-                logger.error("ai.classify.json_parse_error", error=str(e), title=title[:60])
-                return None
+                return validated
+            # Tool was called but output is unusable — fall through to None so
+            # the caller fails over to Claude, then to a Celery retry.
+            return None
 
     # Fallback to pure text parsing
     text_content = message.get("content", "")
     if text_content:
         try:
-            return json.loads(text_content)
+            return _validate_classification(json.loads(text_content), title)
         except json.JSONDecodeError:
             pass
 
@@ -296,22 +345,23 @@ def _parse_claude_response(data: dict, title: str) -> dict[str, Any] | None:
 
     for block in content_blocks:
         if block.get("type") == "tool_use" and block.get("name") == "classify_article":
-            result = block.get("input", {})
-            if result:
+            validated = _validate_classification(block.get("input", {}), title)
+            if validated is not None:
                 logger.info(
                     "ai.classify.success",
                     provider="claude",
                     title=title[:60],
-                    category=result.get("category"),
-                    relevance=result.get("relevance_score"),
+                    category=validated.get("category"),
+                    relevance=validated.get("relevance_score"),
                 )
-                return result
+                return validated
+            return None
 
     # Fallback: try to parse text blocks as JSON
     for block in content_blocks:
         if block.get("type") == "text":
             try:
-                return json.loads(block["text"])
+                return _validate_classification(json.loads(block["text"]), title)
             except (json.JSONDecodeError, KeyError):
                 pass
 
