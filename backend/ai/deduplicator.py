@@ -78,7 +78,13 @@ def compute_uniqueness_score(
             RawMaterial.tenant_id == tenant_id,
             RawMaterial.scraped_at >= cutoff,
             RawMaterial.id != material_id,
-            RawMaterial.status.in_(["classified", "adapting", "adapted", "published"]),
+            # 'evaluated' is the dominant post-scoring status and MUST be in the
+            # comparison pool — omitting it (the old bug) made dedup compare a
+            # new candidate against only a small slice of recent materials and
+            # let same-story dupes through.
+            RawMaterial.status.in_(
+                ["classified", "evaluated", "adapting", "adapted", "published"]
+            ),
         )
         .limit(500)  # Safety cap
     ).all()
