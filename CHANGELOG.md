@@ -54,6 +54,7 @@
 - Статус-индикаторы: «✅ Опубликовано в Telegram» / «⏳ Одобрено — публикация в очереди»
 
 ### Changed
+- AI-классификатор: основным провайдером сделан Claude Haiku, Gemini переведён в фоллбэк — `gemini-3.1-pro` на KIE перестал вызывать tool (отвечает прозой), и лидирование Gemini тратило холостой вызов перед каждым фоллбэком на Claude.
 - Обложки из источника: одно изображение теперь используется максимум на одном посте. `_fetch_source_image` отклоняет SHA, уже привязанный к другому материалу того же источника (`_load_used_cover_hashes`, заменил порог `DEFAULT_IMAGE_THRESHOLD`). Раньше общее/рубричное/wire-фото попадало обложкой на 3+ разных новостей.
 - `autopilot_rank_and_queue` и lazy-adapt: добавлен JOIN с `raw_materials` и фильтр по `scraped_at >= now() - max_material_age_hours`
 - Порог семантического дедупа в `autopilot_rank_and_queue` ослаблен с `uniqueness < 2.0` (similarity > 0.8) на `< 4.0` (similarity > 0.6)
