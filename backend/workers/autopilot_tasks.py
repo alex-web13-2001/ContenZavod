@@ -871,21 +871,22 @@ def autopilot_publish_next(self):
                     )
                     continue
 
-            # Cover-image dedup at publish time, keyed on the NORMALIZED source
-            # URL (not SHA). rank_and_queue checks this at enqueue, but an item
-            # may have been queued hours ago while a duplicate slipped past.
-            # Last line of defence. URL-based because outlets re-encode the same
-            # photo on every fetch, so SHA-256 differs and never matches.
+            # Cover-image dedup at publish time. rank_and_queue checks this at
+            # enqueue, but an item may have been queued hours ago while a
+            # duplicate slipped past. Last line of defence. Two keys: normalized
+            # source URL AND the stored cover file path (which is named by SHA,
+            # so identical bytes under different source filenames share one path
+            # — that's the common "same stock photo on unrelated posts" case).
             from workers.image_dedup import normalize_image_url
-            cover_src_pub = (
-                ((mat.metadata_ or {}).get("cover_image") or {}).get("source_url") if mat else None
-            )
-            cover_src_norm = normalize_image_url(cover_src_pub) if cover_src_pub else None
-            if cover_src_norm:
-                recent_src_rows = session.execute(
+            _cover = ((mat.metadata_ or {}).get("cover_image") or {}) if mat else {}
+            cover_src_norm = normalize_image_url(_cover.get("source_url") or "") or None
+            cover_file_pub = _cover.get("url") or None
+            if cover_src_norm or cover_file_pub:
+                recent_rows = session.execute(
                     text(
                         """
-                        SELECT m.metadata->'cover_image'->>'source_url' AS src
+                        SELECT m.metadata->'cover_image'->>'source_url' AS src,
+                               m.metadata->'cover_image'->>'url'        AS fileurl
                           FROM autopilot_queue apq
                           JOIN channel_adaptations ca ON ca.id = apq.adaptation_id
                           JOIN raw_materials m       ON m.id  = ca.material_id
@@ -893,7 +894,7 @@ def autopilot_publish_next(self):
                            AND apq.status = 'published'
                            AND apq.published_at >= :cutoff
                            AND apq.id != :self_id
-                           AND m.metadata->'cover_image'->>'source_url' IS NOT NULL
+                           AND m.metadata->'cover_image' IS NOT NULL
                         """
                     ),
                     {
@@ -902,7 +903,12 @@ def autopilot_publish_next(self):
                         "self_id": str(item.id),
                     },
                 ).all()
-                if any(normalize_image_url(r[0]) == cover_src_norm for r in recent_src_rows if r[0]):
+                dup = any(
+                    (cover_file_pub and r[1] == cover_file_pub)
+                    or (cover_src_norm and r[0] and normalize_image_url(r[0]) == cover_src_norm)
+                    for r in recent_rows
+                )
+                if dup:
                     item.status = "skipped"
                     item.skip_reason = "cover_url_dup_at_publish_time"
                     log.info(
