@@ -10,7 +10,6 @@ import hashlib
 import io
 import uuid
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 
 import httpx
 import structlog
@@ -21,6 +20,7 @@ from app.database import get_sync_session
 from app.models.material import RawMaterial
 from app.models.source import Source
 from scraper.rss_parser import discover_feed_url, parse_rss_feed
+from workers.image_dedup import normalize_image_url
 
 logger = structlog.get_logger()
 
@@ -32,23 +32,32 @@ SOURCE_IMAGE_TIMEOUT = 15.0
 SOURCE_IMAGE_BAD_URL_TOKENS = (
     "logo", "default", "placeholder", "share", "social-card", "og-default",
 )
-# A genuine article hero photo is used exactly once. If a source-image SHA is
-# already attached to another material from the same source, it's a shared/
-# section/wire photo — we must NOT reuse it as a cover (that's how one photo
-# ended up on several unrelated posts). Enforced via _load_used_cover_hashes.
+# A genuine article hero photo is used exactly once. If a source-image's
+# normalized URL is already attached to another material from the same source,
+# it's a shared/section/wire photo — we must NOT reuse it as a cover (that's how
+# one photo ended up on several unrelated posts). Enforced via
+# _load_used_cover_urls + normalize_image_url (URL key survives CDN re-encoding).
 
 
 def _fetch_source_image(
-    url: str, blocked_hashes: set[str]
+    url: str, used_urls: set[str]
 ) -> tuple[bytes, str, str] | None:
     """Download a candidate image URL and validate.
 
     Returns (data, content_type, sha256) on success, None on rejection.
-    Rejection reasons: HTTP failure, too small, banned URL tokens, dimension
-    check fail, or hash already used as a cover for this source (blocked_hashes).
+    Rejection reasons: normalized URL already used as a cover for this source
+    (the primary dedup key — survives CDN/resize byte changes), HTTP failure,
+    too small, banned URL tokens, or dimension-check fail.
     """
     lower = url.lower()
     if any(tok in lower for tok in SOURCE_IMAGE_BAD_URL_TOKENS):
+        return None
+
+    # Primary dedup BEFORE downloading: if this image's normalized URL was
+    # already used as a cover, skip it (saves the HTTP fetch). SHA-256 can't
+    # catch these because the outlet re-encodes the bytes on every request.
+    if normalize_image_url(url) in used_urls:
+        logger.info("source_image.url_already_used_skip", url=url)
         return None
 
     try:
@@ -70,9 +79,6 @@ def _fetch_source_image(
         return None
 
     sha = hashlib.sha256(data).hexdigest()
-    if sha in blocked_hashes:
-        logger.info("source_image.already_used_skip", url=url, sha=sha[:12])
-        return None
 
     # Dimension check via Pillow if available; if not installed, skip the
     # check (size-in-bytes filter above already removes most icons).
@@ -112,26 +118,27 @@ def _store_source_image(
     return f"/api/v1/files/{object_name}"
 
 
-def _load_used_cover_hashes(session, source_id: uuid.UUID) -> set[str]:
-    """All cover-image SHAs already attached to materials in this source.
+def _load_used_cover_urls(session, source_id: uuid.UUID) -> set[str]:
+    """Normalized source URLs of all cover images already used in this source.
 
     Any image used once is off-limits for new covers: a real per-article photo
-    never legitimately reappears, so a repeat SHA is a shared/section/wire image.
-    This guarantees one image is used on at most one post per source — fixing
-    the "same photo on several unrelated news items" bug.
+    never legitimately reappears, so a repeat URL is a shared/section/wire image.
+    Keyed on the NORMALIZED source URL (not SHA) so it survives CDN re-encoding,
+    which is what let one photo land on several unrelated posts. Guarantees an
+    image is used on at most one post per source.
     """
     rows = session.execute(
         text(
             """
-            SELECT DISTINCT metadata->'cover_image'->>'sha256' AS sha
+            SELECT DISTINCT metadata->'cover_image'->>'source_url' AS src
               FROM raw_materials
              WHERE source_id = :sid
-               AND metadata->'cover_image'->>'sha256' IS NOT NULL
+               AND metadata->'cover_image'->>'source_url' IS NOT NULL
             """
         ),
         {"sid": str(source_id)},
     ).all()
-    return {r[0] for r in rows if r[0]}
+    return {normalize_image_url(r[0]) for r in rows if r[0]}
 
 
 def _run_async(coro):
@@ -196,11 +203,12 @@ def scrape_source(self, source_id: str, tenant_id: str):
             ).all()
         )
 
-        # All cover-image SHAs already used by this source. An image used once
-        # must never become another post's cover (the "same photo on many news
-        # items" bug). Seeded from the DB, then updated in-loop so repeats
-        # within this same scrape batch are blocked too.
-        used_cover_hashes = _load_used_cover_hashes(session, source.id)
+        # Normalized source URLs of all cover images already used by this source.
+        # An image used once must never become another post's cover (the "same
+        # photo on many news items" bug). Keyed on normalized URL, not SHA, so it
+        # survives CDN re-encoding. Seeded from the DB, then updated in-loop so
+        # repeats within this same scrape batch are blocked too.
+        used_cover_urls = _load_used_cover_urls(session, source.id)
 
         new_count = 0
         new_image_count = 0
@@ -211,11 +219,11 @@ def scrape_source(self, source_id: str, tenant_id: str):
             meta = mat_data.get("metadata_", {}) or {}
 
             # Try to attach a source image (one HTTP per new material, capped).
-            # _fetch_source_image rejects any SHA already in used_cover_hashes,
+            # _fetch_source_image rejects any URL already in used_cover_urls,
             # so each distinct image lands on at most one material.
             image_url = mat_data.get("image_url")
             if image_url:
-                fetched = _fetch_source_image(image_url, used_cover_hashes)
+                fetched = _fetch_source_image(image_url, used_cover_urls)
                 if fetched:
                     img_bytes, ct, sha = fetched
                     try:
@@ -229,7 +237,8 @@ def scrape_source(self, source_id: str, tenant_id: str):
                         }
                         meta["cover_status"] = "ready"
                         new_image_count += 1
-                        used_cover_hashes.add(sha)  # block reuse later in this batch
+                        # block reuse later in this batch (normalized URL key)
+                        used_cover_urls.add(normalize_image_url(image_url))
                     except Exception as e:
                         log.warning(
                             "source_image.upload_failed",
