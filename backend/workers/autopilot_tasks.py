@@ -384,33 +384,38 @@ def autopilot_rank_and_queue(self):
             ).scalars().all()
             already_published_materials = set(already_queued_material_ids)
 
-            # Cross-source dedup by cover image SHA: two outlets often republish
-            # the same wire-photo for the same story. If we've already published
-            # something with this exact image in the last 24h, treat the new
-            # candidate as a likely retelling and skip it. Catches cases the
-            # semantic dedup misses when entity overlap is just under threshold.
+            # Cross-source dedup by cover image: two outlets often republish the
+            # same wire-photo for the same story. If we've already published
+            # something with this image in the last 24h, treat the new candidate
+            # as a likely retelling and skip it. Catches cases the semantic dedup
+            # misses when entity overlap is just under threshold. Keyed on the
+            # NORMALIZED source URL, not SHA — outlets re-encode the bytes on
+            # every fetch, so SHA-256 differs and never matches.
+            from workers.image_dedup import normalize_image_url
             sha_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-            recently_published_cover_shas: set[str] = set()
+            recently_published_cover_urls: set[str] = set()
             try:
-                cover_sha_rows = session.execute(
+                cover_url_rows = session.execute(
                     text(
                         """
-                        SELECT DISTINCT m.metadata->'cover_image'->>'sha256' AS sha
+                        SELECT DISTINCT m.metadata->'cover_image'->>'source_url' AS src
                           FROM autopilot_queue apq
                           JOIN channel_adaptations ca ON ca.id = apq.adaptation_id
                           JOIN raw_materials m       ON m.id  = ca.material_id
                          WHERE apq.channel_id = :ch
                            AND apq.status = 'published'
                            AND apq.published_at >= :cutoff
-                           AND m.metadata->'cover_image'->>'sha256' IS NOT NULL
+                           AND m.metadata->'cover_image'->>'source_url' IS NOT NULL
                         """
                     ),
                     {"ch": str(channel.id), "cutoff": sha_cutoff},
                 ).all()
-                recently_published_cover_shas = {r[0] for r in cover_sha_rows if r[0]}
+                recently_published_cover_urls = {
+                    normalize_image_url(r[0]) for r in cover_url_rows if r[0]
+                }
             except Exception as e:
                 # Don't break ranking on a dedup-query glitch
-                log.warning("autopilot.cover_sha_dedup_query_failed", error=str(e))
+                log.warning("autopilot.cover_url_dedup_query_failed", error=str(e))
 
             # Hard freshness cutoff: never enqueue materials older than this.
             # Configurable per-channel via autopilot_config.max_material_age_hours.
@@ -551,12 +556,14 @@ def autopilot_rank_and_queue(self):
                 # just published almost certainly means we're about to publish
                 # the same story again. Tracked separately on the in-cycle set
                 # so multiple candidates in the same batch don't all sneak past.
-                cover_sha = ((material.metadata_ or {}).get("cover_image") or {}).get("sha256")
-                if cover_sha and cover_sha in recently_published_cover_shas:
+                # Keyed on normalized source URL (survives CDN re-encoding).
+                cover_src = ((material.metadata_ or {}).get("cover_image") or {}).get("source_url")
+                cover_src_norm = normalize_image_url(cover_src) if cover_src else None
+                if cover_src_norm and cover_src_norm in recently_published_cover_urls:
                     log.info(
-                        "autopilot.skip_cover_sha_dup",
+                        "autopilot.skip_cover_url_dup",
                         material_id=str(material.id),
-                        cover_sha=cover_sha[:12],
+                        cover_url=cover_src[:60],
                         title=material.title[:60] if material.title else "",
                     )
                     continue
@@ -722,12 +729,12 @@ def autopilot_rank_and_queue(self):
                 queued_by_lang[lang] = queued_by_lang.get(lang, 0) + 1
                 queued_formats[fmt] = queued_formats.get(fmt, 0) + 1
 
-                # Track this cover SHA so a later candidate in the same cycle
+                # Track this cover URL so a later candidate in the same cycle
                 # carrying the same wire-photo (different source, same story)
-                # gets caught by the cover_sha dedup above.
-                _accepted_sha = ((material.metadata_ or {}).get("cover_image") or {}).get("sha256")
-                if _accepted_sha:
-                    recently_published_cover_shas.add(_accepted_sha)
+                # gets caught by the cover-URL dedup above.
+                _accepted_src = ((material.metadata_ or {}).get("cover_image") or {}).get("source_url")
+                if _accepted_src:
+                    recently_published_cover_urls.add(normalize_image_url(_accepted_src))
 
                 # Cover policy:
                 #   * Any format with a source image → attach it (free).
@@ -864,39 +871,44 @@ def autopilot_publish_next(self):
                     )
                     continue
 
-            # Cover-SHA dedup at publish time. rank_and_queue already does this
-            # check at enqueue, but an item may have been queued hours ago while
-            # a duplicate slipped past separately. Last line of defence.
-            cover_sha_pub = ((mat.metadata_ or {}).get("cover_image") or {}).get("sha256") if mat else None
-            if cover_sha_pub:
-                already_pub = session.execute(
+            # Cover-image dedup at publish time, keyed on the NORMALIZED source
+            # URL (not SHA). rank_and_queue checks this at enqueue, but an item
+            # may have been queued hours ago while a duplicate slipped past.
+            # Last line of defence. URL-based because outlets re-encode the same
+            # photo on every fetch, so SHA-256 differs and never matches.
+            from workers.image_dedup import normalize_image_url
+            cover_src_pub = (
+                ((mat.metadata_ or {}).get("cover_image") or {}).get("source_url") if mat else None
+            )
+            cover_src_norm = normalize_image_url(cover_src_pub) if cover_src_pub else None
+            if cover_src_norm:
+                recent_src_rows = session.execute(
                     text(
                         """
-                        SELECT 1 FROM autopilot_queue apq
+                        SELECT m.metadata->'cover_image'->>'source_url' AS src
+                          FROM autopilot_queue apq
                           JOIN channel_adaptations ca ON ca.id = apq.adaptation_id
                           JOIN raw_materials m       ON m.id  = ca.material_id
                          WHERE apq.channel_id = :ch
                            AND apq.status = 'published'
                            AND apq.published_at >= :cutoff
-                           AND m.metadata->'cover_image'->>'sha256' = :sha
                            AND apq.id != :self_id
-                         LIMIT 1
+                           AND m.metadata->'cover_image'->>'source_url' IS NOT NULL
                         """
                     ),
                     {
                         "ch": str(item.channel_id),
                         "cutoff": now - timedelta(hours=24),
-                        "sha": cover_sha_pub,
                         "self_id": str(item.id),
                     },
-                ).scalar()
-                if already_pub:
+                ).all()
+                if any(normalize_image_url(r[0]) == cover_src_norm for r in recent_src_rows if r[0]):
                     item.status = "skipped"
-                    item.skip_reason = "cover_sha_dup_at_publish_time"
+                    item.skip_reason = "cover_url_dup_at_publish_time"
                     log.info(
-                        "autopilot.skip_cover_sha_at_publish",
+                        "autopilot.skip_cover_url_at_publish",
                         adaptation_id=str(item.adaptation_id),
-                        cover_sha=cover_sha_pub[:12],
+                        cover_url=cover_src_pub[:60],
                     )
                     continue
 
