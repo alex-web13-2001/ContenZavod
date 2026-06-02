@@ -91,12 +91,22 @@ CLASSIFY_TOOL = {
                         "longread (rare, target ~5-10%): Reserved for substantial analysis, investigations, multi-source explainers, or complex topics with 4+ data points, expert opinions, and a clear narrative arc. If in doubt, prefer short_post over longread."
                     ),
                 },
+                "suggested_cover_style": {
+                    "type": "string",
+                    "enum": ["photo_clean", "photo_text", "none"],
+                    "description": (
+                        "Recommended cover visual for this article, to keep the feed varied:\n"
+                        "photo_clean (DEFAULT, ~60%): a clean photorealistic photograph with NO text — best for most stories: events, nature, places, people, incidents, daily life.\n"
+                        "photo_text (~25%): a photo with a short bold headline overlaid — reserve for dramatic/breaking/high-impact stories that benefit from a poster-like punch.\n"
+                        "none (~15%): no image at all — for trivial/administrative micro-news (schedules, brief notices, routine announcements) where an image adds nothing."
+                    ),
+                },
             },
             "required": [
                 "category", "subcategory", "tags",
                 "summary_ru", "summary_en",
                 "relevance_score", "sentiment", "is_breaking",
-                "key_entities", "suggested_format",
+                "key_entities", "suggested_format", "suggested_cover_style",
             ],
         },
     },
