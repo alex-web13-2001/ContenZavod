@@ -43,6 +43,23 @@ Rules:
 
 Always call the create_prompt tool with your result."""
 
+# Variant used when we want a CLEAN photo with NO text baked in — a believable
+# editorial photograph, not a graphic/poster. Used for the "photo_clean" style.
+PROMPT_SYSTEM_CLEAN = """You are an expert visual prompt engineer for AI image generation.
+Your task: create a prompt for a CLEAN photorealistic news photograph — no text.
+
+Rules:
+1. The image MUST look like a real editorial/documentary photograph
+2. The scene MUST visually match the news topic
+3. Natural, believable composition — like a photo a news agency would shoot on location
+4. Include lighting, lens feel, depth of field, atmosphere
+5. ABSOLUTELY NO text, letters, captions, headlines, watermarks, logos, posters, or graphic overlays
+6. NO collage, NO magazine-cover styling — a single clean photograph
+7. Avoid generic stock-photo clichés; make it specific to the story
+8. Think like a photojournalist for a major news outlet
+
+Always call the create_prompt tool with your result."""
+
 PROMPT_TOOL = {
     "type": "function",
     "function": {
@@ -81,11 +98,17 @@ async def _generate_prompt_via_gemini(
     summary: str,
     language: str = "ru",
     content_text: str = "",
+    with_overlay: bool = True,
 ) -> dict[str, str]:
-    """Use KIE Gemini to create an optimal image prompt. May raise on API issues."""
+    """Use KIE Gemini to create an optimal image prompt. May raise on API issues.
+
+    with_overlay=False produces a CLEAN photo prompt (no text baked into the
+    image) and returns an empty overlay_text.
+    """
     lang_name = LANGUAGE_NAMES.get(language, language)
-    
-    user_message = f"""Create a photorealistic cover image prompt for this news article.
+
+    if with_overlay:
+        user_message = f"""Create a photorealistic cover image prompt for this news article.
 
 --- NEWS CONTEXT ---
 Headline: {headline}
@@ -99,14 +122,30 @@ Style: Photorealistic, dramatic, cinematic lighting
 The overlay text should be a SHORT catchy phrase in {lang_name} that makes readers want to read the article.
 It should NOT be the full headline — make it punchier and shorter (3-8 words max).
 """
+    else:
+        user_message = f"""Create a CLEAN photorealistic news photograph prompt for this article.
 
+--- NEWS CONTEXT ---
+Headline: {headline}
+Summary: {summary}
+Content excerpt: {(content_text or '')[:1500]}
+
+--- REQUIREMENTS ---
+Aspect ratio: 16:9 (wide cinematic)
+Style: realistic editorial/documentary photography, on-location feel
+NO text of any kind in the image — no overlay, no captions, no headlines.
+Leave overlay_text EMPTY. Make the scene specific to the story, not a generic stock cliché.
+"""
+
+    system_prompt = PROMPT_SYSTEM if with_overlay else PROMPT_SYSTEM_CLEAN
     payload = {
         "model": "gemini-3.1-pro",
         "messages": [
-            {"role": "system", "content": [{"type": "text", "text": PROMPT_SYSTEM}]},
+            {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
             {"role": "user", "content": [{"type": "text", "text": user_message}]},
         ],
         "tools": [PROMPT_TOOL],
+        "tool_choice": {"type": "function", "function": {"name": "create_prompt"}},
         "stream": False,
     }
 
@@ -174,33 +213,42 @@ def _generate_prompt_fallback(
     headline: str,
     summary: str,
     language: str = "ru",
+    with_overlay: bool = True,
 ) -> dict[str, str]:
     """Build a high-quality image prompt without AI when KIE Gemini is unavailable.
 
     Uses the headline/summary to create a cinematic, photorealistic prompt
-    that GPT Image-2 can work with directly.
+    that GPT Image-2 can work with directly. with_overlay=False → clean photo.
     """
-    lang_name = LANGUAGE_NAMES.get(language, language)
-
-    # Build a descriptive scene prompt from headline context
-    prompt = (
-        f"A photorealistic, cinematic wide-angle (16:9) news cover image. "
-        f"The scene visually represents the following news story: \"{headline}\". "
-        f"Context: {summary[:500]}. "
-        f"Style: dramatic lighting, vivid colors, shallow depth of field, "
-        f"professional editorial photography, ultra high quality. "
-        f"The image should feel like a premium magazine cover or a top-tier news outlet header. "
-        f"No watermarks, no stock photo elements, no logos."
-    )
-
-    # Derive short overlay text from headline (first meaningful words)
-    words = headline.split()
-    overlay = " ".join(words[:6]) + ("…" if len(words) > 6 else "")
+    if with_overlay:
+        prompt = (
+            f"A photorealistic, cinematic wide-angle (16:9) news cover image. "
+            f"The scene visually represents the following news story: \"{headline}\". "
+            f"Context: {summary[:500]}. "
+            f"Style: dramatic lighting, vivid colors, shallow depth of field, "
+            f"professional editorial photography, ultra high quality. "
+            f"The image should feel like a premium magazine cover or a top-tier news outlet header. "
+            f"No watermarks, no stock photo elements, no logos."
+        )
+        words = headline.split()
+        overlay = " ".join(words[:6]) + ("…" if len(words) > 6 else "")
+    else:
+        prompt = (
+            f"A clean photorealistic editorial photograph, wide-angle (16:9), "
+            f"shot on location for a news story: \"{headline}\". "
+            f"Context: {summary[:500]}. "
+            f"Style: realistic documentary photography, natural lighting, shallow depth of field, "
+            f"believable real-world scene, ultra high quality. "
+            f"Absolutely NO text, captions, headlines, watermarks, logos, posters or graphic overlays. "
+            f"A single clean photograph, not a collage or magazine cover."
+        )
+        overlay = ""
 
     logger.info(
         "image.prompt_fallback_used",
         language=language,
         headline_len=len(headline),
+        with_overlay=with_overlay,
     )
 
     return {"prompt": prompt, "overlay_text": overlay}
@@ -211,10 +259,12 @@ async def generate_image_prompt(
     summary: str,
     language: str = "ru",
     content_text: str = "",
+    with_overlay: bool = True,
 ) -> dict[str, str]:
     """Generate an image prompt — tries KIE Gemini first, falls back to templates.
 
     Returns: {"prompt": "...", "overlay_text": "..."}
+    with_overlay=False asks for a clean no-text photo (overlay_text empty).
     """
     if not KIE_API_KEY:
         raise ImageGenerationError("No KIE API key configured")
@@ -226,7 +276,10 @@ async def generate_image_prompt(
             summary=summary,
             language=language,
             content_text=content_text,
+            with_overlay=with_overlay,
         )
+        if not with_overlay:
+            result["overlay_text"] = ""  # enforce clean even if model added one
         return result
     except ImageGenerationError as e:
         # If Gemini is down (maintenance, 500, etc.), use fallback
@@ -234,11 +287,13 @@ async def generate_image_prompt(
             "image.gemini_unavailable_using_fallback",
             error=str(e)[:120],
         )
-        return _generate_prompt_fallback(
+        result = _generate_prompt_fallback(
             headline=headline,
             summary=summary,
             language=language,
+            with_overlay=with_overlay,
         )
+        return result
     except httpx.RequestError as e:
         logger.warning(
             "image.gemini_network_error_using_fallback",
@@ -248,6 +303,7 @@ async def generate_image_prompt(
             headline=headline,
             summary=summary,
             language=language,
+            with_overlay=with_overlay,
         )
 
 
@@ -371,9 +427,12 @@ async def generate_cover_image(
     summary: str,
     language: str = "ru",
     content_text: str = "",
+    with_overlay: bool = True,
 ) -> dict[str, Any]:
     """Full pipeline: generate prompt → create image → poll → return result.
-    
+
+    with_overlay=False produces a clean photorealistic image with NO text baked in.
+
     Returns: {
         "image_url": "https://...",  # temporary KIE URL (download ASAP!)
         "prompt": "...",
@@ -386,18 +445,20 @@ async def generate_cover_image(
         summary=summary,
         language=language,
         content_text=content_text,
+        with_overlay=with_overlay,
     )
 
     full_prompt = prompt_data["prompt"]
-    overlay = prompt_data.get("overlay_text", "")
+    overlay = prompt_data.get("overlay_text", "") if with_overlay else ""
 
-    # If overlay text exists, ensure it's part of the prompt
-    if overlay and overlay.lower() not in full_prompt.lower():
+    # Only bake overlay text into the prompt in the with-overlay mode.
+    if with_overlay and overlay and overlay.lower() not in full_prompt.lower():
         full_prompt += f'\n\nOverlay bold modern typography text on the image: "{overlay}"'
 
     logger.info(
         "image.prompt_ready",
         prompt_length=len(full_prompt),
+        with_overlay=with_overlay,
         overlay=overlay[:50] if overlay else "",
     )
 
