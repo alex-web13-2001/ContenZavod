@@ -804,11 +804,14 @@ def generate_cover_image(self, material_id: str, tenant_id: str, language: str =
     max_retries=5,
     queue="media_queue",
 )
-def generate_adaptation_cover(self, adaptation_id: str, tenant_id: str):
+def generate_adaptation_cover(self, adaptation_id: str, tenant_id: str, with_overlay: bool | None = None):
     """Generate an AI cover image for a specific adaptation.
 
-    Uses the adaptation's language and headline to generate a cover
-    with text overlay in the correct language.
+    with_overlay=True  → photo with a short headline baked in (poster style).
+    with_overlay=False → clean photorealistic photo, no text.
+    with_overlay=None  → derive from the material's suggested_cover_style
+                         (photo_text → overlay, otherwise clean). This keeps
+                         retries/manual paths consistent with the chosen style.
     """
     from app.models.channel_adaptation import ChannelAdaptation
 
@@ -841,6 +844,15 @@ def generate_adaptation_cover(self, adaptation_id: str, tenant_id: str):
         ai_data = (material.metadata_ or {}).get("ai_classification", {})
         summary = ai_data.get("summary_en") or ai_data.get("summary_ru") or ""
 
+        # Resolve overlay mode: explicit arg wins; otherwise derive from the
+        # AI-suggested cover style so retries/manual paths stay consistent.
+        if with_overlay is None:
+            cover_style = ai_data.get("suggested_cover_style", "photo_clean")
+            overlay_mode = cover_style == "photo_text"
+        else:
+            overlay_mode = with_overlay
+        log = log.bind(with_overlay=overlay_mode)
+
         from ai.image_generator import generate_cover_image as gen_image, ImageGenerationError
 
         try:
@@ -849,6 +861,7 @@ def generate_adaptation_cover(self, adaptation_id: str, tenant_id: str):
                 summary=summary,
                 language=language,
                 content_text=material.content_text or "",
+                with_overlay=overlay_mode,
             ))
         except ImageGenerationError as e:
             log.error("image.adaptation.failed", error=str(e))

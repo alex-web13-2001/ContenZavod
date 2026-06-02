@@ -67,6 +67,10 @@ def _get_autopilot_config(channel) -> dict:
         "min_interval_minutes": 45,
         "min_score_threshold": 7.0,
         "cover_policy": "short_post_optional",
+        # When False, ignore article source photos and always AI-generate covers
+        # (keeps the feed visually consistent and varied via suggested_cover_style).
+        # The scraper still downloads/stores source images, so this is reversible.
+        "use_source_images": False,
         "schedule_slots": ["morning", "lunch", "evening", "night"],
         "category_limits": {},
         "ttl_hours": {},
@@ -736,18 +740,33 @@ def autopilot_rank_and_queue(self):
                 if _accepted_src:
                     recently_published_cover_urls.add(normalize_image_url(_accepted_src))
 
-                # Cover policy:
-                #   * Any format with a source image → attach it (free).
-                #   * Non-flash without source image → trigger AI gen.
-                #   * Flash without source image → no cover (by design).
+                # Cover policy — driven by AI-suggested style + channel config:
+                #   1. cover_style == "none"            → no cover (feed variety)
+                #   2. use_source_images && src ready    → attach source photo (free)
+                #   3. otherwise non-flash               → AI-generate
+                #        - style "photo_text" → image with headline overlay
+                #        - style "photo_clean"/default → clean photo, no text
+                #   4. flash without a cover             → no cover (by design)
                 if not adapt.cover_status:
                     mat_meta = (material.metadata_ or {})
+                    cover_style = (mat_meta.get("ai_classification", {}) or {}).get(
+                        "suggested_cover_style", "photo_clean"
+                    )
+                    use_source = config.get("use_source_images", True)
                     src_cover = (
                         mat_meta.get("cover_image")
                         if mat_meta.get("cover_status") == "ready"
                         else None
                     )
-                    if src_cover and src_cover.get("url"):
+
+                    if cover_style == "none" or config.get("cover_policy") == "never":
+                        # Intentionally no cover — keeps the feed mixed.
+                        log.info(
+                            "autopilot.cover_skipped_style_none",
+                            adaptation_id=str(adapt.id),
+                            format=fmt,
+                        )
+                    elif use_source and src_cover and src_cover.get("url"):
                         adapt.cover_image_url = src_cover["url"]
                         adapt.cover_status = "ready"
                         session.flush()
@@ -757,11 +776,15 @@ def autopilot_rank_and_queue(self):
                             format=fmt,
                             sha=src_cover.get("sha256", "")[:12],
                         )
-                    elif fmt != "flash" and config.get("cover_policy") != "never":
+                    elif fmt != "flash":
+                        # AI-generate. Pass the desired style through cover_status
+                        # so the worker knows whether to bake in overlay text.
                         adapt.cover_status = "generating"
                         adapt.cover_retry_count = 0
                         session.flush()
 
+                        # with_overlay omitted → the task derives it from the
+                        # material's suggested_cover_style (consistent on retries).
                         from workers.ai_tasks import generate_adaptation_cover
                         generate_adaptation_cover.delay(
                             str(adapt.id), str(adapt.tenant_id)
@@ -769,6 +792,7 @@ def autopilot_rank_and_queue(self):
                         log.info(
                             "autopilot.cover_dispatched",
                             adaptation_id=str(adapt.id),
+                            style=cover_style,
                         )
 
                 log.info(

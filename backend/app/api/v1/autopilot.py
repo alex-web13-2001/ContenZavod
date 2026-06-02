@@ -38,6 +38,7 @@ class AutopilotConfigUpdate(BaseModel):
     min_interval_minutes: int | None = None
     min_score_threshold: float | None = None
     cover_policy: str | None = None
+    use_source_images: bool | None = None  # False → always AI-generate covers
     schedule_slots: list[str] | None = None
     strategies: list[str] | None = None
     category_limits: dict | None = None
@@ -98,6 +99,7 @@ async def get_autopilot_config(
                 "min_interval_minutes": config.get("min_interval_minutes", 45),
                 "min_score_threshold": config.get("min_score_threshold", 7.0),
                 "cover_policy": config.get("cover_policy", "short_post_optional"),
+                "use_source_images": config.get("use_source_images", False),
                 "schedule_slots": config.get("schedule_slots", ["morning", "lunch", "evening", "night"]),
                 "strategies": config.get("strategies", ["smart_queue", "express"]),
                 "category_limits": config.get("category_limits", {}),
