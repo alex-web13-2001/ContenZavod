@@ -938,7 +938,7 @@ def autopilot_publish_next(self):
                     log.info(
                         "autopilot.skip_cover_url_at_publish",
                         adaptation_id=str(item.adaptation_id),
-                        cover_url=cover_src_pub[:60],
+                        cover_url=(cover_file_pub or cover_src_norm or "")[:60],
                     )
                     continue
 
