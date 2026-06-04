@@ -21,27 +21,16 @@ from app.models.material import RawMaterial
 
 log = structlog.get_logger()
 
-# Ubiquitous entities that carry almost no story-identifying signal — they appear
-# in a huge share of Cyprus articles, so they must NOT count toward "same story".
-STOPWORD_ENTITIES: frozenset[str] = frozenset({
-    "cyprus", "republic of cyprus", "kypros", "nicosia", "lefkosia", "limassol",
-    "larnaca", "paphos", "famagusta", "kyrenia", "european union", "eu", "euro",
-    "cyprus mail", "philenews", "in-cyprus", "cna", "politis", "police", "government",
-})
-
-# Cross-source dedup rule (complements Jaccard). The same event reported by two
-# outlets shares the same concrete named entities even when each adds its own
-# extras — so Jaccard stays low (~0.25) while the count of shared SPECIFIC
-# entities is high. If that count clears the bar AND covers a real fraction of
-# the smaller fingerprint, treat it as a duplicate regardless of Jaccard.
-# Tuned on real data (06-04): 3/0.30 fired on 32 pairs incl. false positives —
-# different developments of the SAME ongoing story (e.g. "Papadakis to sue" vs
-# "Sword of Damocles", both about the Sandy affair) got killed, starving the
-# feed. 5/0.50 fires on only the 4 genuine cross-edition dupes (one news item in
-# EN + GR), letting follow-up/angle stories through.
-SPECIFIC_OVERLAP_MIN = 5        # ≥ this many shared non-stopword entities
-SPECIFIC_OVERLAP_FRACTION = 0.50  # AND ≥ this fraction of the smaller specific set
+# Title-based dedup (complements Jaccard). Entity-overlap counting was tried and
+# abandoned (06-04): news items about the same ongoing affair legitimately share
+# 5+ named entities, so no entity threshold separates "same text re-published /
+# cross-edition" from "different follow-up on the same story" — it kept killing
+# real follow-ups and starving the feed. Titles do separate them: the same news
+# item carries an (almost) identical headline across editions/re-scrapes, while
+# a follow-up has a distinctly different one. We flag a duplicate when the
+# normalized title is (near-)identical to a recent material's.
 DUPLICATE_UNIQUENESS = 3.0      # forced score when the rule fires (< autopilot's 4.5 skip)
+TITLE_DUP_JACCARD = 0.75        # word-level Jaccard on normalized titles ≥ this → same news
 
 
 def _jaccard_similarity(set_a: set[str], set_b: set[str]) -> float:
@@ -55,6 +44,26 @@ def _jaccard_similarity(set_a: set[str], set_b: set[str]) -> float:
     if not union:
         return 0.0
     return len(set_a & set_b) / len(union)
+
+
+def _title_word_set(title: str) -> set[str]:
+    """Normalize a headline to a set of significant lowercase word-tokens.
+
+    Strips emoji/punctuation, lowercases, drops 1-2 char tokens. Used to detect
+    the SAME news item across editions/re-scrapes (near-identical headline),
+    independent of language script.
+    """
+    if not title:
+        return set()
+    import re
+
+    tokens = re.findall(r"\w+", title.lower(), flags=re.UNICODE)
+    return {t for t in tokens if len(t) > 2}
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """Word-level Jaccard between two normalized titles (0.0–1.0)."""
+    return _jaccard_similarity(_title_word_set(a), _title_word_set(b))
 
 
 def compute_uniqueness_score(
@@ -89,12 +98,17 @@ def compute_uniqueness_score(
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
-    # Fetch semantic fingerprints of recent materials (excluding self)
-    # Using raw SQL for JSONB extraction since metadata_ is JSONB
+    # Title of the material being scored (for title-based dedup).
+    self_title = session.execute(
+        select(RawMaterial.title).where(RawMaterial.id == material_id)
+    ).scalar()
+
+    # Fetch semantic fingerprints + titles of recent materials (excluding self)
     recent = session.execute(
         select(
             RawMaterial.id,
             RawMaterial.metadata_["semantic_fingerprint"],
+            RawMaterial.title,
         )
         .where(
             RawMaterial.tenant_id == tenant_id,
@@ -114,18 +128,20 @@ def compute_uniqueness_score(
     if not recent:
         return 10.0
 
-    # Specific (non-stopword) entities of the candidate — used for the
-    # cross-source overlap rule that Jaccard alone misses.
-    fp_specific = fp_set - STOPWORD_ENTITIES
-
     max_sim = 0.0
     most_similar_id = None
-    overlap_hit: tuple[uuid.UUID, int, int] | None = None  # (id, shared, smaller_set)
+    title_hit: tuple[uuid.UUID, float] | None = None  # (id, title_similarity)
 
-    for row_id, other_fp_raw in recent:
+    for row_id, other_fp_raw, other_title in recent:
+        # Title-based dedup: the SAME news item keeps an (almost) identical
+        # headline across editions/re-scrapes; a follow-up has a different one.
+        if self_title and other_title:
+            t_sim = _title_similarity(self_title, other_title)
+            if t_sim >= TITLE_DUP_JACCARD and (title_hit is None or t_sim > title_hit[1]):
+                title_hit = (row_id, t_sim)
+
         if not other_fp_raw or not isinstance(other_fp_raw, list):
             continue
-
         other_set = {e.lower().strip() for e in other_fp_raw if isinstance(e, str) and e}
         if not other_set:
             continue
@@ -134,19 +150,6 @@ def compute_uniqueness_score(
         if sim > max_sim:
             max_sim = sim
             most_similar_id = row_id
-
-        # Cross-source overlap check on SPECIFIC entities only.
-        other_specific = other_set - STOPWORD_ENTITIES
-        shared = len(fp_specific & other_specific)
-        smaller = min(len(fp_specific), len(other_specific))
-        if (
-            smaller > 0
-            and shared >= SPECIFIC_OVERLAP_MIN
-            and shared / smaller >= SPECIFIC_OVERLAP_FRACTION
-        ):
-            # Keep the strongest overlap (most shared specific entities)
-            if overlap_hit is None or shared > overlap_hit[1]:
-                overlap_hit = (row_id, shared, smaller)
 
     if max_sim > 0.5:
         log.info(
@@ -159,17 +162,15 @@ def compute_uniqueness_score(
 
     jaccard_score = round(10.0 * (1.0 - max_sim), 2)
 
-    # If the cross-source rule fired, force a duplicate-level score (overriding a
-    # deceptively-high Jaccard score). This catches the same story told by two
-    # outlets in different words/languages, where Jaccard stays ~0.25.
-    if overlap_hit is not None:
+    # Title near-match → same news item republished/cross-edition. Force a
+    # duplicate-level score regardless of a deceptively-high entity Jaccard.
+    if title_hit is not None:
         forced = min(jaccard_score, DUPLICATE_UNIQUENESS)
         log.info(
-            "dedup.cross_source_overlap",
+            "dedup.title_match",
             material_id=str(material_id),
-            similar_to=str(overlap_hit[0]),
-            shared_specific=overlap_hit[1],
-            smaller_specific_set=overlap_hit[2],
+            similar_to=str(title_hit[0]),
+            title_similarity=round(title_hit[1], 3),
             jaccard_score=jaccard_score,
             forced_score=forced,
         )
