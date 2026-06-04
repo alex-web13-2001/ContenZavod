@@ -34,8 +34,13 @@ STOPWORD_ENTITIES: frozenset[str] = frozenset({
 # extras — so Jaccard stays low (~0.25) while the count of shared SPECIFIC
 # entities is high. If that count clears the bar AND covers a real fraction of
 # the smaller fingerprint, treat it as a duplicate regardless of Jaccard.
-SPECIFIC_OVERLAP_MIN = 3        # ≥ this many shared non-stopword entities
-SPECIFIC_OVERLAP_FRACTION = 0.30  # AND ≥ this fraction of the smaller specific set
+# Tuned on real data (06-04): 3/0.30 fired on 32 pairs incl. false positives —
+# different developments of the SAME ongoing story (e.g. "Papadakis to sue" vs
+# "Sword of Damocles", both about the Sandy affair) got killed, starving the
+# feed. 5/0.50 fires on only the 4 genuine cross-edition dupes (one news item in
+# EN + GR), letting follow-up/angle stories through.
+SPECIFIC_OVERLAP_MIN = 5        # ≥ this many shared non-stopword entities
+SPECIFIC_OVERLAP_FRACTION = 0.50  # AND ≥ this fraction of the smaller specific set
 DUPLICATE_UNIQUENESS = 3.0      # forced score when the rule fires (< autopilot's 4.5 skip)
 
 
