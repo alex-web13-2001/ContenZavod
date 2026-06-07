@@ -32,6 +32,39 @@ log = structlog.get_logger()
 DUPLICATE_UNIQUENESS = 3.0      # forced score when the rule fires (< autopilot's 4.5 skip)
 TITLE_DUP_JACCARD = 0.75        # word-level Jaccard on normalized titles ≥ this → same news
 
+# Cross-language semantic dedup via the classifier's canonical event_key.
+# This is the ONLY rule that catches the same real-world event reported by
+# different outlets in different languages (EN Cyprus Mail + GR Philenews) where
+# titles and entities share zero words. The LLM isn't byte-deterministic in the
+# slug's tail (…-launch vs …-2026), so we match on shared significant TOKENS of
+# the key, not exact string equality.
+EVENT_KEY_MIN_SHARED = 3        # ≥ this many shared significant tokens
+EVENT_KEY_FRACTION = 0.60       # AND ≥ this fraction of the smaller token set
+# Generic slug tokens that carry no event-identifying signal (year noise, the
+# ever-present "cyprus", filler). Excluded from the overlap count.
+EVENT_KEY_STOPTOKENS: frozenset[str] = frozenset({
+    "cyprus", "the", "and", "for", "new", "launch", "plan", "2024", "2025", "2026", "2027",
+})
+
+
+def _event_key_tokens(key: str) -> set[str]:
+    """Significant hyphen tokens of an event_key (lowercased, stopwords removed)."""
+    if not key:
+        return set()
+    return {
+        t for t in key.lower().replace("_", "-").split("-")
+        if len(t) > 2 and t not in EVENT_KEY_STOPTOKENS
+    }
+
+
+def _same_event(key_a: str, key_b: str) -> bool:
+    """True if two event_keys describe the same event (token-overlap match)."""
+    a, b = _event_key_tokens(key_a), _event_key_tokens(key_b)
+    if not a or not b:
+        return False
+    shared = len(a & b)
+    return shared >= EVENT_KEY_MIN_SHARED and shared / min(len(a), len(b)) >= EVENT_KEY_FRACTION
+
 
 def _jaccard_similarity(set_a: set[str], set_b: set[str]) -> float:
     """Compute Jaccard similarity between two sets.
@@ -98,17 +131,21 @@ def compute_uniqueness_score(
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
-    # Title of the material being scored (for title-based dedup).
-    self_title = session.execute(
-        select(RawMaterial.title).where(RawMaterial.id == material_id)
-    ).scalar()
+    # Title + canonical event_key of the material being scored.
+    self_row = session.execute(
+        select(RawMaterial.title, RawMaterial.metadata_["event_key"])
+        .where(RawMaterial.id == material_id)
+    ).first()
+    self_title = self_row[0] if self_row else None
+    self_event_key = self_row[1] if self_row else None
 
-    # Fetch semantic fingerprints + titles of recent materials (excluding self)
+    # Fetch fingerprints + titles + event_keys of recent materials (excluding self)
     recent = session.execute(
         select(
             RawMaterial.id,
             RawMaterial.metadata_["semantic_fingerprint"],
             RawMaterial.title,
+            RawMaterial.metadata_["event_key"],
         )
         .where(
             RawMaterial.tenant_id == tenant_id,
@@ -131,8 +168,17 @@ def compute_uniqueness_score(
     max_sim = 0.0
     most_similar_id = None
     title_hit: tuple[uuid.UUID, float] | None = None  # (id, title_similarity)
+    event_hit: uuid.UUID | None = None  # cross-language same-event match
 
-    for row_id, other_fp_raw, other_title in recent:
+    self_ek = self_event_key if isinstance(self_event_key, str) else None
+
+    for row_id, other_fp_raw, other_title, other_ek in recent:
+        # Cross-language event dedup: same real-world event → overlapping
+        # canonical event_key, even when titles/entities share no words.
+        if self_ek and isinstance(other_ek, str) and _same_event(self_ek, other_ek):
+            if event_hit is None:
+                event_hit = row_id
+
         # Title-based dedup: the SAME news item keeps an (almost) identical
         # headline across editions/re-scrapes; a follow-up has a different one.
         if self_title and other_title:
@@ -161,6 +207,20 @@ def compute_uniqueness_score(
         )
 
     jaccard_score = round(10.0 * (1.0 - max_sim), 2)
+
+    # Strongest signal: same canonical event_key → same real-world event, even
+    # across languages/outlets with zero shared words. Force duplicate score.
+    if event_hit is not None:
+        forced = min(jaccard_score, DUPLICATE_UNIQUENESS)
+        log.info(
+            "dedup.event_key_match",
+            material_id=str(material_id),
+            similar_to=str(event_hit),
+            event_key=self_ek,
+            jaccard_score=jaccard_score,
+            forced_score=forced,
+        )
+        return max(0.0, min(10.0, forced))
 
     # Title near-match → same news item republished/cross-edition. Force a
     # duplicate-level score regardless of a deceptively-high entity Jaccard.

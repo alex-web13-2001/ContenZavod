@@ -106,6 +106,12 @@ def classify_material(self, material_id: str, tenant_id: str):
         if key_entities:
             meta["semantic_fingerprint"] = [e.lower().strip() for e in key_entities if e]
 
+        # Canonical cross-language event key for semantic dedup (top-level for
+        # cheap querying). Same real-world event in EN/GR/RU → same/overlapping key.
+        event_key = result.get("event_key")
+        if event_key:
+            meta["event_key"] = event_key.lower().strip()
+
         material.metadata_ = meta
         material.status = "classified"
         session.commit()

@@ -81,6 +81,24 @@ CLASSIFY_TOOL = {
                     "items": {"type": "string"},
                     "description": "10-15 key factual entities from this article for deduplication. Include: specific person names, organization names, place names, exact numbers/amounts, specific dates, law/bill names, event names. Must be normalized (e.g. 'European Union' not 'EU', 'Nikos Christodoulides' not 'president'). Lowercase.",
                 },
+                "event_key": {
+                    "type": "string",
+                    "description": (
+                        "A canonical, LANGUAGE-INDEPENDENT identifier of the underlying real-world EVENT this article reports. "
+                        "Purpose: the SAME event covered by different outlets or in different languages MUST produce the SAME key, "
+                        "so cross-language/cross-source duplicates can be detected.\n"
+                        "Format: lowercase ASCII, hyphen-separated, 4-8 words: who/what + where + when-ish. English only.\n"
+                        "Capture the EVENT, not the article's angle or wording. Two articles about the same press conference, "
+                        "campaign launch, court ruling, accident, or announcement get the SAME key even if one emphasises "
+                        "reactions and the other consequences.\n"
+                        "Examples:\n"
+                        "  'Larnaca launches water-saving campaign' (EN) and 'Λάρνακα: εκστρατεία εξοικονόμησης νερού' (GR) "
+                        "→ both 'larnaca-water-saving-campaign-2026'\n"
+                        "  A follow-up that is a genuinely DIFFERENT development (e.g. a lawsuit filed weeks later) gets a DIFFERENT key.\n"
+                        "Do NOT include the outlet name. Be specific enough to not collapse unrelated stories on the same topic "
+                        "(e.g. two different traffic accidents are different events)."
+                    ),
+                },
                 "suggested_format": {
                     "type": "string",
                     "enum": ["flash", "short_post", "longread"],
@@ -106,7 +124,7 @@ CLASSIFY_TOOL = {
                 "category", "subcategory", "tags",
                 "summary_ru", "summary_en",
                 "relevance_score", "sentiment", "is_breaking",
-                "key_entities", "suggested_format", "suggested_cover_style",
+                "key_entities", "event_key", "suggested_format", "suggested_cover_style",
             ],
         },
     },
@@ -124,6 +142,7 @@ Rules:
 - relevance_score: 90-100 for Cyprus-specific news, 70-89 for regional (Middle East, EU), 50-69 for world news affecting Cyprus, <50 for distant world news
 - is_breaking: only for truly urgent events (wars, earthquakes, major political changes)
 - key_entities: Extract 10-15 specific factual entities for deduplication. Focus on proper nouns, exact figures, dates, and named events. **Always normalize to English/Latin script** (e.g. "Nikos Christodoulides" not "Νίκος Χριστοδουλίδης", "European Union" not "Ευρωπαϊκή Ένωση"). All lowercase. This lets the dedup engine match the same event across language editions.
+- event_key: THE most important field for catching cross-language duplicates. Distil the article down to the single real-world EVENT it reports and emit a canonical English slug for it. The SAME event from a different outlet or in a different language MUST get the byte-identical key. Think: "if another paper covered this exact event, what slug would they also land on?" Capture the event, not the angle. A genuinely different later development is a different event → different key. Never include the outlet name.
 
 Always call the classify_article tool with your analysis."""
 
