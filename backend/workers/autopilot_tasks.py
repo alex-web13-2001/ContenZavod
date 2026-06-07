@@ -7,6 +7,7 @@ Four periodic tasks:
 - autopilot_expire_stale:    Remove expired items from queue (every hour)
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -19,6 +20,20 @@ from app.database import get_sync_session
 from ai.deduplicator import compute_uniqueness_score
 
 log = structlog.get_logger()
+
+
+def _run_async(coro):
+    """Run an async coroutine from this sync Celery context."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                return pool.submit(asyncio.run, coro).result()
+    except RuntimeError:
+        pass
+    return asyncio.run(coro)
 
 # Time slots for Cyprus (UTC+3 = EEST), stored as UTC hours
 SCHEDULE_SLOTS = {
@@ -388,6 +403,34 @@ def autopilot_rank_and_queue(self):
             ).scalars().all()
             already_published_materials = set(already_queued_material_ids)
 
+            # Recent published/queued items for this channel as compact
+            # "headline — summary" strings, newest first. Used by the LLM-judge
+            # semantic dedup (final layer) to catch same-event-different-angle
+            # cross-language dupes the cheap heuristics miss. Fetched once per
+            # channel; capped to keep the judge prompt small and cheap.
+            recent_pub_rows = session.execute(
+                text(
+                    """
+                    SELECT ca.headline,
+                           m.metadata->'ai_classification'->>'summary_ru' AS summ
+                      FROM autopilot_queue apq
+                      JOIN channel_adaptations ca ON ca.id = apq.adaptation_id
+                      JOIN raw_materials m        ON m.id  = ca.material_id
+                     WHERE apq.channel_id = :ch
+                       AND apq.status IN ('queued','shadow','approved','publishing','published')
+                       AND apq.created_at >= now() - interval '48 hours'
+                     ORDER BY apq.created_at DESC
+                     LIMIT 12
+                    """
+                ),
+                {"ch": str(channel.id)},
+            ).all()
+            recent_published_summaries = [
+                f"{(h or '').strip()} — {(s or '').strip()}"
+                for h, s in recent_pub_rows
+                if (h or s)
+            ]
+
             # Cross-source dedup by cover image: two outlets often republish the
             # same wire-photo for the same story. If we've already published
             # something with this image in the last 24h, treat the new candidate
@@ -640,6 +683,31 @@ def autopilot_rank_and_queue(self):
                         limit=cat_max,
                     )
                     continue
+
+                # Final dedup layer: LLM-judge on MEANING. Runs only here — after
+                # all cheap filters passed, so at most once per real finalist —
+                # and catches same-event-different-angle cross-language dupes the
+                # heuristics miss (e.g. DISY/Fidias deal led differently by two
+                # outlets). Fails open (never blocks publishing on API error).
+                if recent_published_summaries:
+                    ai_cls = (material.metadata_ or {}).get("ai_classification", {})
+                    cand_str = (
+                        f"{(adapt.headline or material.title or '').strip()} — "
+                        f"{(ai_cls.get('summary_ru') or ai_cls.get('summary_en') or '').strip()}"
+                    )
+                    from ai.semantic_dedup import find_duplicate
+                    dup = _run_async(
+                        find_duplicate(cand_str, recent_published_summaries)
+                    )
+                    if dup is not None:
+                        log.info(
+                            "autopilot.skip_semantic_duplicate",
+                            material_id=str(material.id),
+                            title=(material.title or "")[:60],
+                            matched=recent_published_summaries[dup[0]][:60],
+                            reason=dup[1][:80],
+                        )
+                        continue
 
                 scored_items.append({
                     "adaptation": adapt,
