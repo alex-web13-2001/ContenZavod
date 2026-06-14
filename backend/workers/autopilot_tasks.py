@@ -1190,6 +1190,15 @@ def autopilot_retry_covers(self):
     from app.models.channel_adaptation import ChannelAdaptation
     from app.models.autopilot_queue import AutopilotQueueItem
 
+    # Circuit breaker: if the image provider is in cooldown (credits/network
+    # down), skip the whole sweep. Re-dispatching covers now would just pile up
+    # failing tasks and burn credits the moment they return — exactly the
+    # overnight blow-up this guards against.
+    from ai.provider_health import is_breaker_open
+    if is_breaker_open():
+        log.warning("autopilot.cover_retry_skipped_breaker_open")
+        return {"status": "skipped", "reason": "image_provider_cooldown"}
+
     max_retries = 10
     # Only retry covers that failed recently (within 48h)
     age_cutoff = datetime.now(timezone.utc) - timedelta(hours=48)

@@ -743,8 +743,17 @@ def generate_cover_image(self, material_id: str, tenant_id: str, language: str =
                 content_text=material.content_text or "",
             ))
         except ImageGenerationError as e:
-            log.error("image.generate.failed", error=str(e))
+            from ai.provider_health import is_hard_failure
             meta = {**material.metadata_}
+            if is_hard_failure(str(e)):
+                # Provider systemically down — don't retry (circuit breaker).
+                log.warning("image.generate.provider_down_no_retry", error=str(e)[:120])
+                meta["cover_status"] = "permanently_failed"
+                meta["cover_error"] = str(e)[:300]
+                material.metadata_ = meta
+                session.commit()
+                return {"status": "error", "reason": "provider_down"}
+            log.error("image.generate.failed", error=str(e))
             meta["cover_status"] = "error"
             meta["cover_error"] = str(e)
             material.metadata_ = meta
@@ -860,6 +869,7 @@ def generate_adaptation_cover(self, adaptation_id: str, tenant_id: str, with_ove
         log = log.bind(with_overlay=overlay_mode)
 
         from ai.image_generator import generate_cover_image as gen_image, ImageGenerationError
+        from ai.provider_health import is_hard_failure
 
         try:
             result = _run_async(gen_image(
@@ -870,6 +880,16 @@ def generate_adaptation_cover(self, adaptation_id: str, tenant_id: str, with_ove
                 with_overlay=overlay_mode,
             ))
         except ImageGenerationError as e:
+            # Circuit breaker: on a systemic failure (credits/network/cooldown)
+            # do NOT retry — that's what burned all credits overnight (21 covers
+            # → ~2500 attempts). Mark permanently_failed so the periodic
+            # retry_covers sweep also leaves it alone until the breaker clears.
+            if is_hard_failure(str(e)):
+                log.warning("image.adaptation.provider_down_no_retry", error=str(e)[:120])
+                adaptation.cover_status = "permanently_failed"
+                adaptation.cover_last_error = str(e)[:300]
+                session.commit()
+                return {"status": "error", "reason": "provider_down"}
             log.error("image.adaptation.failed", error=str(e))
             adaptation.cover_status = "error"
             adaptation.cover_last_error = str(e)

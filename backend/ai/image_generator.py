@@ -311,11 +311,21 @@ async def generate_image_prompt(
 
 async def create_image_task(prompt: str) -> str:
     """Submit image generation task to KIE.ai GPT Image-2.
-    
+
     Returns: taskId
+
+    Circuit breaker: if the provider is already known-down (cooldown active),
+    fail fast without calling the API. On a hard failure (credits/network) it
+    trips the breaker so the next ~30 min of cover work short-circuits instead
+    of hammering KIE — see ai/provider_health.
     """
     if not KIE_API_KEY:
         raise ImageGenerationError("No KIE API key configured")
+
+    from ai.provider_health import is_breaker_open, is_hard_failure, trip_breaker
+
+    if is_breaker_open():
+        raise ImageGenerationError("KIE image provider in cooldown (circuit open)")
 
     payload = {
         "model": "gpt-image-2-text-to-image",
@@ -335,14 +345,20 @@ async def create_image_task(prompt: str) -> str:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(IMAGE_CREATE_URL, headers=headers, json=payload)
     except httpx.RequestError as e:
-        raise ImageGenerationError(f"KIE create task request failed: {e}")
+        msg = f"KIE create task request failed: {e}"
+        if is_hard_failure(str(e)):
+            trip_breaker(msg)
+        raise ImageGenerationError(msg)
 
     if resp.status_code != 200:
         raise ImageGenerationError(f"KIE create task HTTP {resp.status_code}: {resp.text[:300]}")
 
     data = resp.json()
     if data.get("code") != 200:
-        raise ImageGenerationError(f"KIE create task error: {data.get('msg', 'unknown')}")
+        msg = f"KIE create task error: {data.get('msg', 'unknown')}"
+        if is_hard_failure(msg):
+            trip_breaker(msg)
+        raise ImageGenerationError(msg)
 
     task_id = data.get("data", {}).get("taskId")
     if not task_id:
