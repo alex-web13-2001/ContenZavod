@@ -301,16 +301,39 @@ def scrape_source(self, source_id: str, tenant_id: str):
 
 @shared_task(name="workers.scrape_tasks.scrape_all_active_sources")
 def scrape_all_active_sources():
-    """Fan-out: queue scrape_source for every active source."""
+    """Fan-out: queue scrape_source for every active source of a non-paused project.
+
+    A source is scraped only if it is active AND its project is not paused
+    (Project.is_active = false). Sources with no project (legacy/unassigned)
+    are still scraped, so detaching a source from a project never silently
+    stops it.
+    """
+    from app.models.project import Project
+
     logger.info("scrape.fan_out.start")
 
     with get_sync_session() as session:
-        sources = session.execute(
-            select(Source.id, Source.tenant_id).where(Source.is_active.is_(True))
+        # Projects currently paused (is_active = false)
+        paused_project_ids = set(
+            session.execute(
+                select(Project.id).where(Project.is_active.is_(False))
+            ).scalars().all()
+        )
+
+        rows = session.execute(
+            select(Source.id, Source.tenant_id, Source.project_id).where(
+                Source.is_active.is_(True)
+            )
         ).all()
 
-    for source_id, tenant_id in sources:
+    queued = 0
+    skipped_paused = 0
+    for source_id, tenant_id, project_id in rows:
+        if project_id is not None and project_id in paused_project_ids:
+            skipped_paused += 1
+            continue
         scrape_source.delay(str(source_id), str(tenant_id))
+        queued += 1
 
-    logger.info("scrape.fan_out.done", count=len(sources))
-    return {"queued": len(sources)}
+    logger.info("scrape.fan_out.done", count=queued, skipped_paused=skipped_paused)
+    return {"queued": queued, "skipped_paused": skipped_paused}

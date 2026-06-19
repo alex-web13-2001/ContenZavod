@@ -250,10 +250,15 @@ def autopilot_rank_and_queue(self):
     from app.models.project_score import MaterialProjectScore
     from app.models.material import RawMaterial
 
+    from app.models.project import Project
+
     with get_sync_session() as session:
-        # Find channels with autopilot enabled
+        # Find active channels whose project is NOT paused (Project.is_active).
+        # A paused project freezes its whole autopilot — nothing new is queued.
         channels = session.execute(
-            select(Channel).where(Channel.is_active == True)
+            select(Channel)
+            .join(Project, Channel.project_id == Project.id)
+            .where(Channel.is_active == True, Project.is_active == True)
         ).scalars().all()
 
         total_queued = 0
@@ -904,17 +909,22 @@ def autopilot_publish_next(self):
     published_count = 0
 
     with get_sync_session() as session:
-        # Get items ready to publish (queued or approved, scheduled_at <= now)
-        # Express first (strategy priority), then by final_score
+        # Get items ready to publish (queued or approved, scheduled_at <= now).
+        # Items of a PAUSED project (Project.is_active=false) are frozen — left
+        # in the queue untouched, just not selected; they resume on unpause.
+        # Express first (strategy priority), then by final_score.
+        from app.models.project import Project
         strategy_priority = case(
             (AutopilotQueueItem.strategy == "express", 0),
             else_=1,
         )
         items = session.execute(
             select(AutopilotQueueItem)
+            .join(Project, AutopilotQueueItem.project_id == Project.id)
             .where(
                 AutopilotQueueItem.status.in_(["queued", "approved"]),
                 AutopilotQueueItem.scheduled_at <= now,
+                Project.is_active == True,
             )
             .order_by(
                 strategy_priority.asc(),

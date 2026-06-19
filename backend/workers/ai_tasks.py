@@ -321,6 +321,13 @@ def adapt_material_for_channels(self, material_id: str, project_id: str, tenant_
             log.error("ai.adapt_channels.material_not_found")
             return {"status": "error", "reason": "not_found"}
 
+        # Skip if the project is paused (is_active = false)
+        from app.models.project import Project
+        project = session.get(Project, uuid.UUID(project_id))
+        if not project or not project.is_active:
+            log.info("ai.adapt_channels.project_paused", project_id=project_id)
+            return {"status": "ok", "adapted": 0, "reason": "project_paused"}
+
         # Get all active channels for this project
         channels = session.execute(
             select(Channel).where(
