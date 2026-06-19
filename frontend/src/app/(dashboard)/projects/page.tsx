@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { CzCard, CzBadge, CzButton, CzInput, CzDialog, CzPageHeader, CzEmptyState, CzSkeletonGrid } from "@/components/ui-system";
-import { FolderOpen, Plus, Send, Sparkles, ChevronRight } from "lucide-react";
+import { FolderOpen, Plus, Send, Sparkles, ChevronRight, Pause, Play } from "lucide-react";
 import Link from "next/link";
 
 interface Project {
@@ -40,6 +40,26 @@ export default function ProjectsPage() {
   }, []);
 
   useEffect(() => { fetchProjects(); }, [fetchProjects]);
+
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  const handleTogglePause = async (e: React.MouseEvent, p: Project) => {
+    // Card is wrapped in a Link — don't navigate when clicking the button.
+    e.preventDefault();
+    e.stopPropagation();
+    if (togglingId) return;
+    setTogglingId(p.id);
+    // Optimistic flip so the UI responds instantly.
+    setProjects((prev) => prev.map((x) => x.id === p.id ? { ...x, is_active: !x.is_active } : x));
+    try {
+      await api.post(`/projects/${p.id}/${p.is_active ? "pause" : "resume"}`);
+    } catch {
+      // Revert on failure.
+      setProjects((prev) => prev.map((x) => x.id === p.id ? { ...x, is_active: p.is_active } : x));
+    } finally {
+      setTogglingId(null);
+    }
+  };
 
   const handleCreate = async () => {
     if (!formName.trim()) return;
@@ -159,8 +179,17 @@ export default function ProjectsPage() {
                       </div>
                     )}
                     <CzBadge variant={p.is_active ? "success" : "default"}>
-                      {p.is_active ? "Активен" : "Неактивен"}
+                      {p.is_active ? "Активен" : "На паузе"}
                     </CzBadge>
+                    <CzButton
+                      variant="ghost"
+                      onClick={(e) => handleTogglePause(e, p)}
+                      disabled={togglingId === p.id}
+                      icon={p.is_active ? <Pause size={12} /> : <Play size={12} />}
+                      style={{ marginLeft: "auto" }}
+                    >
+                      {p.is_active ? "Пауза" : "Запустить"}
+                    </CzButton>
                   </div>
                 </div>
               </CzCard>

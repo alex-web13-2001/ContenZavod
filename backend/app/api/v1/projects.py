@@ -80,6 +80,44 @@ async def update_project(
     return ProjectResponse.model_validate(project)
 
 
+@router.post("/{project_id}/pause", response_model=ProjectResponse)
+async def pause_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _user: str = Depends(get_current_user_id),
+):
+    """Pause a project: stops its scraping, scoring, adaptation and autopilot.
+
+    Reversible — the project and all its data are kept. Already-queued autopilot
+    items are frozen (not published) until the project is resumed.
+    """
+    from app.services.project_service import ProjectService
+
+    service = ProjectService(db, tenant_id)
+    project = await service.update(project_id, ProjectUpdate(is_active=False))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return ProjectResponse.model_validate(project)
+
+
+@router.post("/{project_id}/resume", response_model=ProjectResponse)
+async def resume_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: str = Depends(get_tenant_id),
+    _user: str = Depends(get_current_user_id),
+):
+    """Resume a paused project: the whole pipeline starts running again."""
+    from app.services.project_service import ProjectService
+
+    service = ProjectService(db, tenant_id)
+    project = await service.update(project_id, ProjectUpdate(is_active=True))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return ProjectResponse.model_validate(project)
+
+
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(
     project_id: str,
